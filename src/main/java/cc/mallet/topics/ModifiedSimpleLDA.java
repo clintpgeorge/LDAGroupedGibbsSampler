@@ -7,6 +7,7 @@ import java.lang.reflect.InvocationTargetException;
 import java.text.NumberFormat;
 import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.List;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.logging.Level;
 import java.util.logging.Logger;
@@ -28,12 +29,20 @@ import cc.mallet.util.LDAUtils;
 import cc.mallet.util.MalletLogger;
 import cc.mallet.util.Randoms;
 
+/**
+ * Derivative of SimpleLDA, but with support for non-uniform alpha and beta
+ * 
+ * @author Leif Jonsson
+ */
 public class ModifiedSimpleLDA implements LDAGibbsSampler, AbortableSampler, Serializable {
 
 	protected static Logger logger = MalletLogger.getLogger(ModifiedSimpleLDA.class.getName());
 
 	// the training instances and their topic assignments
 	protected ArrayList<TopicAssignment> data;  
+	
+	// The original training data
+	InstanceList trainingData;
 
 	// the alphabet for the input data
 	protected Alphabet alphabet; 
@@ -73,15 +82,10 @@ public class ModifiedSimpleLDA implements LDAGibbsSampler, AbortableSampler, Ser
 	
 	// Structures for hyperparameter optimization 
 	protected AtomicInteger [][] documentTopicHistogram;
-	protected int longestDocLength = 0;
+	protected int longestDocLength = -1;
 	protected boolean saveHistStats = false;
 
 	protected static volatile boolean abort = false;
-	/**
-	 * Derivative of SimpleLDA, but with support for non-uniform alpha and beta
-	 * 
-	 * @author Leif Jonsson
-	 */
 	private static final long serialVersionUID = 1L;
 	int startSeed;
 
@@ -107,7 +111,10 @@ public class ModifiedSimpleLDA implements LDAGibbsSampler, AbortableSampler, Ser
 	// The max over typeTotals, used for beta optimization
 	int maxTypeCount;
 	
-	private static LabelAlphabet newLabelAlphabet (int numTopics) {
+	List<Double> loglikelihood = new ArrayList<>();
+	List<Double> heldOutLoglikelihood = new ArrayList<>();
+	
+	public static LabelAlphabet newTopicLabelAlphabet (int numTopics) {
 		LabelAlphabet ret = new LabelAlphabet();
 		for (int i = 0; i < numTopics; i++)
 			ret.lookupIndex("topic"+i);
@@ -116,7 +123,7 @@ public class ModifiedSimpleLDA implements LDAGibbsSampler, AbortableSampler, Ser
 
 	public ModifiedSimpleLDA(LDAConfiguration conf) {		
 		this.data = new ArrayList<TopicAssignment>();
-		this.topicAlphabet = newLabelAlphabet (conf.getNoTopics(LDAConfiguration.NO_TOPICS_DEFAULT));
+		this.topicAlphabet = newTopicLabelAlphabet (conf.getNoTopics(LDAConfiguration.NO_TOPICS_DEFAULT));
 		this.numTopics = topicAlphabet.size();
 
 		double alphaConf = conf.getAlpha(LDAConfiguration.ALPHA_DEFAULT);
@@ -489,8 +496,8 @@ public class ModifiedSimpleLDA implements LDAGibbsSampler, AbortableSampler, Ser
 	}
 
 	@Override
-	public ArrayList<TopicAssignment> getDataset() {
-		return getData();
+	public InstanceList getDataset() {
+		return trainingData;
 	}
 
 	@Override
@@ -548,6 +555,16 @@ public class ModifiedSimpleLDA implements LDAGibbsSampler, AbortableSampler, Ser
 			}
 		}
 		return res;
+	}
+
+	@Override
+	public double[] getLogLikelihood() {
+		return loglikelihood.stream().mapToDouble(d -> d).toArray();
+	}
+
+	@Override
+	public double[] getHeldOutLogLikelihood() {
+		return heldOutLoglikelihood.stream().mapToDouble(d -> d).toArray();
 	}
 
 	protected int sum(int[] vector) {
@@ -840,7 +857,7 @@ public class ModifiedSimpleLDA implements LDAGibbsSampler, AbortableSampler, Ser
 			alphaSum = Dirichlet.learnParameters(alpha, topicDocCounts, docLengthCounts, 1.001, 1.0, 1);
 		}
 		
-		logger.info("[alpha: " + Arrays.toString(alpha) + "] ");	
+		logger.fine("[alpha: " + Arrays.toString(alpha) + "] ");	
 	}
 
 	public void optimizeBeta() {
@@ -884,7 +901,7 @@ public class ModifiedSimpleLDA implements LDAGibbsSampler, AbortableSampler, Ser
 		beta = betaSum / numTypes;
 
 
-		logger.info("[beta: " + formatter.format(beta) + "] ");		
+		logger.fine("[beta: " + formatter.format(beta) + "] ");		
 	}
 
 	@Override
@@ -920,7 +937,7 @@ public class ModifiedSimpleLDA implements LDAGibbsSampler, AbortableSampler, Ser
 	}
 
 	public void addInstances (InstanceList training) {
-
+		trainingData = training;
 		alphabet = training.getDataAlphabet();
 		numTypes = alphabet.size();
 

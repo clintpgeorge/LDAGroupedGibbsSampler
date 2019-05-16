@@ -1,10 +1,12 @@
 package cc.mallet.topics;
 
 import java.io.BufferedOutputStream;
+import java.io.BufferedWriter;
 import java.io.DataOutputStream;
 import java.io.File;
 import java.io.FileNotFoundException;
 import java.io.FileOutputStream;
+import java.io.FileWriter;
 import java.io.IOException;
 import java.io.PrintWriter;
 import java.util.ArrayList;
@@ -102,7 +104,9 @@ public class UncollapsedParallelLDA extends ModifiedSimpleLDA implements LDAGibb
 	SparseDirichlet dirichletSampler;
 	protected boolean savePhiMeans = true;
 	protected int hyperparameterOptimizationInterval;
-
+	int documentSplitLimit;
+	
+	File abortFile = new File("abort");
 	
 	public UncollapsedParallelLDA(LDAConfiguration config) {
 		super(config);
@@ -113,6 +117,7 @@ public class UncollapsedParallelLDA extends ModifiedSimpleLDA implements LDAGibb
 		zTimings = new long[1];
 		countTimings = new long[1];
 		noTopicBatches = config.getNoTopicBatches(LDAConfiguration.NO_TOPIC_BATCHES_DEFAULT);
+		documentSplitLimit = config.getDocumentSamplerSplitLimit(LDAConfiguration.DOCUMENT_SAMPLER_SPLIT_LIMIT_DEFAULT);
 
 		debug = config.getDebug();
 		this.batchIndexes = new int[config.getNoBatches(LDAConfiguration.NO_BATCHES_DEFAULT)];
@@ -296,6 +301,7 @@ public class UncollapsedParallelLDA extends ModifiedSimpleLDA implements LDAGibb
 	 */
 	@Override
 	public void addInstances (InstanceList training) {
+		trainingData = training;
 		alphabet = training.getDataAlphabet();
 		targetAlphabet = training.getTargetAlphabet();
 		numTypes = alphabet.size();
@@ -399,6 +405,15 @@ public class UncollapsedParallelLDA extends ModifiedSimpleLDA implements LDAGibb
 		return random.nextInt(numTopics);
 	}
 
+	/**
+	 * This method can only be called from threads working
+	 * on separate topics. It is not thread safe if several threads
+	 * work on the same topic
+	 * 
+	 * @param type
+	 * @param topic
+	 * @param count
+	 */
 	protected void updateTypeTopicCount(int type, int topic, int count) {
 		topicTypeCountMapping[topic][type] += count;
 		typeTopicCounts[type][topic] += count;
@@ -412,7 +427,7 @@ public class UncollapsedParallelLDA extends ModifiedSimpleLDA implements LDAGibb
 		}
 	}
 
-	protected void moveTopic(int oldTopic, int newTopic, int resetValue) {		
+	protected void moveTopic(int oldTopic, int newTopic, int resetValue) {
 		topicTypeCountMapping[newTopic] = topicTypeCountMapping[oldTopic];
 		topicTypeCountMapping[oldTopic] = new int[numTypes];
 		if(resetValue!=0) {
@@ -421,9 +436,6 @@ public class UncollapsedParallelLDA extends ModifiedSimpleLDA implements LDAGibb
 		for(int type = 0; type < numTypes; type++) {
 			typeTopicCounts[type][newTopic] = typeTopicCounts[type][oldTopic];
 			typeTopicCounts[type][oldTopic] = resetValue;
-			int tmpTpT = tokensPerTopic[newTopic];
-			tokensPerTopic[newTopic] = tokensPerTopic[oldTopic];
-			tokensPerTopic[oldTopic] = tmpTpT;
 			if(topicTypeCountMapping[newTopic][type]<0) {
 				System.err.println("Emergency print!");
 				debugPrintMMatrix();
@@ -432,23 +444,24 @@ public class UncollapsedParallelLDA extends ModifiedSimpleLDA implements LDAGibb
 						+ alphabet.lookupObject(type) + "(" + type + ")");
 			}
 		}
+		int tmpTpT = tokensPerTopic[newTopic];
+		tokensPerTopic[newTopic] = tokensPerTopic[oldTopic];
+		tokensPerTopic[oldTopic] = tmpTpT;
 		
 		double [] tmpTopic = phi[newTopic];
 		phi[newTopic] = phi[oldTopic];
 		phi[oldTopic] = tmpTopic;
 	}
 
-	protected void moveTopic(int oldTopic, int newTopic) {		
+	protected void moveTopic(int oldTopic, int newTopic) {
+		int [] tmpMapping = topicTypeCountMapping[newTopic]; 
 		topicTypeCountMapping[newTopic] = topicTypeCountMapping[oldTopic];
-		topicTypeCountMapping[oldTopic] = new int[numTypes];
+		topicTypeCountMapping[oldTopic] = tmpMapping;
 		for(int type = 0; type < numTypes; type++) {
 			int tmpVal = typeTopicCounts[type][newTopic];
 			typeTopicCounts[type][newTopic] = typeTopicCounts[type][oldTopic];
 			typeTopicCounts[type][oldTopic] = tmpVal;
 			
-			int tmpCnt = tokensPerTopic[newTopic];
-			tokensPerTopic[newTopic] = tokensPerTopic[oldTopic];
-			tokensPerTopic[oldTopic] = tmpCnt;
 			if(topicTypeCountMapping[newTopic][type]<0) {
 				System.err.println("Emergency print!");
 				debugPrintMMatrix();
@@ -457,6 +470,9 @@ public class UncollapsedParallelLDA extends ModifiedSimpleLDA implements LDAGibb
 						+ alphabet.lookupObject(type) + "(" + type + ")");
 			}
 		}
+		int tmpCnt = tokensPerTopic[newTopic];
+		tokensPerTopic[newTopic] = tokensPerTopic[oldTopic];
+		tokensPerTopic[oldTopic] = tmpCnt;
 		
 		double [] tmpTopic = phi[newTopic];
 		phi[newTopic] = phi[oldTopic];
@@ -501,6 +517,7 @@ public class UncollapsedParallelLDA extends ModifiedSimpleLDA implements LDAGibb
 		double logLik = modelLogLikelihood();	
 		String tw = topWords (wordsPerTopic);
 		LogState logState = new LogState(logLik, 0, tw, loggingPath, logger);
+		loglikelihood.add(logLik);
 		LDAUtils.logLikelihoodToFile(logState);
 
 		boolean logTypeTopicDensity = config.logTypeTopicDensity(LDAConfiguration.LOG_TYPE_TOPIC_DENSITY_DEFAULT);
@@ -543,6 +560,11 @@ public class UncollapsedParallelLDA extends ModifiedSimpleLDA implements LDAGibb
 			
 			LDAUtils.logStatstHeaderToFile(stats);
 			LDAUtils.logStatsToFile(stats);
+		}
+		
+		if(config.logTopicIndicators(false)) {
+			logTopicIndicators();
+			System.out.println("Logged topic indicators for iteration: " + getCurrentIteration());
 		}
 
 		for (int iteration = 1; iteration <= iterations && !abort; iteration++) {
@@ -611,11 +633,13 @@ public class UncollapsedParallelLDA extends ModifiedSimpleLDA implements LDAGibb
 				if(testSet != null) {
 					heldOutLL = evaluator.evaluateLeftToRight(testSet, numParticles, null);					
 					LDAUtils.heldOutLLToFile(loggingPath, iteration, heldOutLL, logger);
+					heldOutLoglikelihood.add(heldOutLL);
 				}
 
 				logLik = modelLogLikelihood();	
 				tw = topWords (wordsPerTopic);
 				logState = new LogState(logLik, iteration, tw, loggingPath, logger);
+				loglikelihood.add(logLik);
 				LDAUtils.logLikelihoodToFile(logState);
 				logger.info("<" + iteration + "> Log Likelihood: " + logLik);
 				logger.fine(tw);
@@ -631,6 +655,12 @@ public class UncollapsedParallelLDA extends ModifiedSimpleLDA implements LDAGibb
 							density, docDensity, zTimings, countTimings,phiDensity);
 					}
 					LDAUtils.logStatsToFile(stats);
+				}
+				
+				// WARNING: This will SUBSTANTIALLY slow down the sampler
+				if(config.logTopicIndicators(false)) {
+					logTopicIndicators();
+					System.out.println("Logged topic indicators for iteration: " + getCurrentIteration());
 				}
 				
 				if(logTokensPerTopics) {
@@ -667,6 +697,11 @@ public class UncollapsedParallelLDA extends ModifiedSimpleLDA implements LDAGibb
 			kdDensities.set(0);
 
 			postIteration();
+
+			if(abortFile.exists()) {
+				abort();
+			}
+
 			//long iterEnd = System.currentTimeMillis();
 			//System.out.println("Iteration "+ currentIteration + " took: " + (iterEnd-iterStart) + " milliseconds...");
 		}
@@ -675,6 +710,31 @@ public class UncollapsedParallelLDA extends ModifiedSimpleLDA implements LDAGibb
 
 	}
 
+	protected void logTopicIndicators() {
+		File ld = config.getLoggingUtil().getLogDir();
+		File z_file = new File(ld.getAbsolutePath() + "/z_" + getCurrentIteration() + ".csv");
+		try (FileWriter fw = new FileWriter(z_file, false); 
+				BufferedWriter bw = new BufferedWriter(fw);
+				PrintWriter pw  = new PrintWriter(bw)) {
+
+			for (int docIdx = 0; docIdx < data.size(); docIdx++) {
+				String szs = "";
+				LabelSequence topicSequence =
+						(LabelSequence) data.get(docIdx).topicSequence;
+				int [] oneDocTopics = topicSequence.getFeatures();
+				for (int i = 0; i < topicSequence.size(); i++) {
+					szs += oneDocTopics[i] + ",";
+				}
+				if(szs.length()>0) {
+					szs = szs.substring(0, szs.length()-1);
+				}
+				pw.println(szs);			
+			}			
+		} catch (Exception e) {
+			e.printStackTrace();
+		}
+	}
+	
 	/**
 	 * This method only samples Zbar given Phi, i.e it does not sample/update Phi
 	 * 
@@ -683,18 +743,9 @@ public class UncollapsedParallelLDA extends ModifiedSimpleLDA implements LDAGibb
 	public void sampleZGivenPhi(int iterations) {
 		preSample();
 
-		double logLik = modelLogLikelihood();	
-		String tw = topWords (wordsPerTopic);
-
 		for (int iteration = 1; iteration <= iterations && !abort; iteration++) {
 			preIterationGivenPhi();
 			currentIteration = iteration;
-			//if((iteration%100)==0) System.out.println("Iteration: " + iteration);
-			// Saves timestamp
-			long iterationStart = System.currentTimeMillis();
-			for (int i = 0; i < zTimings.length; i++) {
-				zTimings[i] = iterationStart;
-			}
 
 			// Sample z by dividing the corpus in batches
 			preZ();
@@ -716,8 +767,8 @@ public class UncollapsedParallelLDA extends ModifiedSimpleLDA implements LDAGibb
 			
 			// Occasionally print more information
 			if (showTopicsInterval > 0 && iteration % showTopicsInterval == 0) {
-				logLik = modelLogLikelihood();	
-				tw = topWords (wordsPerTopic);
+				double logLik = modelLogLikelihood();	
+				String tw  = topWords (wordsPerTopic);
 				logger.info("<" + iteration + "> Log Likelihood: " + logLik);
 				logger.fine(tw);
 			}
@@ -725,8 +776,6 @@ public class UncollapsedParallelLDA extends ModifiedSimpleLDA implements LDAGibb
 			kdDensities.set(0);
 
 			postIterationGivenPhi();
-			//long iterEnd = System.currentTimeMillis();
-			//System.out.println("Iteration "+ currentIteration + " took: " + (iterEnd-iterStart) + " milliseconds...");
 		}
 
 		postSample();
@@ -739,9 +788,7 @@ public class UncollapsedParallelLDA extends ModifiedSimpleLDA implements LDAGibb
 	
 	@Override
 	public void postPhi() {
-		if(savePhiMeans() && samplePhiThisIteration()) {
-			noSampledPhi++;
-		}
+
 	}
 
 
@@ -870,6 +917,12 @@ public class UncollapsedParallelLDA extends ModifiedSimpleLDA implements LDAGibb
 		}
 	}
 
+	
+	/**
+	 * 'Call' is executed in parallel, but only one topic is touched per thread
+	 * so no two threads will update the same topic
+	 *
+	 */
 	class ParallelTopicUpdater implements Callable<Long> {
 		int topic;
 		public ParallelTopicUpdater(int topic) {
@@ -948,6 +1001,8 @@ public class UncollapsedParallelLDA extends ModifiedSimpleLDA implements LDAGibb
 	/**
 	 * Spreads the sampling of phi matrix rows on different threads
 	 * Creates Runnable() objects that call functions from the superclass
+	 * 
+	 * TODO: Should be cleaned up!
 	 */
 	protected void samplePhi() {
 		tbb.calculateBatch();
@@ -979,6 +1034,9 @@ public class UncollapsedParallelLDA extends ModifiedSimpleLDA implements LDAGibb
 			} catch (InterruptedException e) {
 				e.printStackTrace();
 			}
+		}
+		if(savePhiMeans() && samplePhiThisIteration()) {
+			noSampledPhi++;
 		}
 	}
 
@@ -1062,7 +1120,7 @@ public class UncollapsedParallelLDA extends ModifiedSimpleLDA implements LDAGibb
 		double [][] resultMatrix;
 		int startDoc = -1;
 		int endDoc = -1;
-		int limit = 100;
+		int limit = 1000;
 		int myBatch = -1;
 
 		public RecursiveDocumentSampler(int startDoc, int endDoc, int batchId, int ll) {
@@ -1080,8 +1138,9 @@ public class UncollapsedParallelLDA extends ModifiedSimpleLDA implements LDAGibb
 							(FeatureSequence) data.get(docIdx).instance.getData();
 					LabelSequence topicSequence =
 							(LabelSequence) data.get(docIdx).topicSequence;
-					double [] docTopicHist = sampleTopicAssignmentsParallel (
-							new UncollapsedLDADocSamplingContext(tokenSequence, topicSequence, myBatch, docIdx));
+					int [] docTopicHist = sampleTopicAssignmentsParallel (
+							new UncollapsedLDADocSamplingContext(tokenSequence, 
+									topicSequence, myBatch, docIdx)).getLocalTopicCounts();
 					if(docTopicHist!=null && saveHistStats)
 						updateGlobalHistogram(docTopicHist);
 				}
@@ -1097,7 +1156,7 @@ public class UncollapsedParallelLDA extends ModifiedSimpleLDA implements LDAGibb
 			}
 		}
 
-		private void updateGlobalHistogram(double[] docTopicHist) {
+		private void updateGlobalHistogram(int[] docTopicHist) {
 			for (int topic = 0; topic < docTopicHist.length; topic++) {				
 				documentTopicHistogram[topic][(int)docTopicHist[topic]].incrementAndGet();
 			}
@@ -1135,7 +1194,7 @@ public class UncollapsedParallelLDA extends ModifiedSimpleLDA implements LDAGibb
 	}*/
 
 	protected void loopOverBatches() {
-		RecursiveDocumentSampler dslr = new RecursiveDocumentSampler(0,data.size(),0,200);                
+		RecursiveDocumentSampler dslr = new RecursiveDocumentSampler(0,data.size(),0,documentSplitLimit);                
 		documentSamplerPool.invoke(dslr);
 	}
 
@@ -1166,7 +1225,7 @@ public class UncollapsedParallelLDA extends ModifiedSimpleLDA implements LDAGibb
 		System.out.println();System.out.println();
 	}
 
-	protected double [] sampleTopicAssignmentsParallel(LDADocSamplingContext ctx) {
+	protected LDADocSamplingResult sampleTopicAssignmentsParallel(LDADocSamplingContext ctx) {
 		FeatureSequence tokens = ctx.getTokens();
 		LabelSequence topics = ctx.getTopics();
 		int myBatch = ctx.getMyBatch();
@@ -1174,12 +1233,12 @@ public class UncollapsedParallelLDA extends ModifiedSimpleLDA implements LDAGibb
 		int type, oldTopic, newTopic;
 
 		final int docLength = tokens.getLength();
-		if(docLength==0) return null;
+		if(docLength==0) return new LDADocSamplingResultDense(new int [0]);
 
 		int [] tokenSequence = tokens.getFeatures();
 		int [] oneDocTopics = topics.getFeatures();
 
-		double[] localTopicCounts = new double[numTopics];
+		int[] localTopicCounts = new int[numTopics];
 
 		// Find the non-zero words and topic counts that we have in this document
 		for (int position = 0; position < docLength; position++) {
@@ -1244,7 +1303,7 @@ public class UncollapsedParallelLDA extends ModifiedSimpleLDA implements LDAGibb
 			 */
 			increment(myBatch,newTopic,type);
 		}
-		return localTopicCounts;
+		return new LDADocSamplingResultDense(localTopicCounts);
 	}
 
 	protected void increment(int myBatch, int newTopic, int type) {
@@ -1309,7 +1368,7 @@ public class UncollapsedParallelLDA extends ModifiedSimpleLDA implements LDAGibb
 
 			docTopics = topicSequence.getFeatures();
 
-			for (int token=0; token < docTopics.length; token++) {
+			for (int token=0; token < topicSequence.size(); token++) {
 				topicCounts[ docTopics[token] ]++;
 			}
 
@@ -1321,8 +1380,8 @@ public class UncollapsedParallelLDA extends ModifiedSimpleLDA implements LDAGibb
 			}
 
 			// subtract the (count + parameter) sum term
-			logLikelihood -= Dirichlet.logGammaStirling(alphaSum + docTopics.length);
 
+			logLikelihood -= Dirichlet.logGammaStirling(alphaSum + topicSequence.size());
 			Arrays.fill(topicCounts, 0);
 		}
 
@@ -1340,13 +1399,14 @@ public class UncollapsedParallelLDA extends ModifiedSimpleLDA implements LDAGibb
 			topicCounts = typeTopicCounts[type];
 
 			for (int topic = 0; topic < numTopics; topic++) {
-				if (topicCounts[topic] == 0) { continue; }
-
+				int topicTypeCount = topicCounts[topic];
+				if (topicTypeCount == 0) { continue; }
+				
 				nonZeroTypeTopics++;
-				logLikelihood += Dirichlet.logGammaStirling(beta + topicCounts[topic]);
+				logLikelihood += Dirichlet.logGammaStirling(beta + topicTypeCount);
 
 				if (Double.isNaN(logLikelihood)) {
-					System.err.println("NaN in log likelihood calculation: " + topicCounts[topic]);
+					System.err.println("NaN in log likelihood calculation: " + topicTypeCount);
 					System.exit(1);
 				} 
 				else if (Double.isInfinite(logLikelihood)) {
@@ -1357,16 +1417,17 @@ public class UncollapsedParallelLDA extends ModifiedSimpleLDA implements LDAGibb
 		}
 
 		for (int topic=0; topic < numTopics; topic++) {
+			int tokensPerTopicK = tokensPerTopic[ topic ];
 			logLikelihood -= 
 					Dirichlet.logGammaStirling( (beta * numTypes) +
-							tokensPerTopic[ topic ] );
+							tokensPerTopicK );
 
 			if (Double.isNaN(logLikelihood)) {
-				logger.info("NaN after topic " + topic + " " + tokensPerTopic[ topic ]);
+				logger.info("NaN after topic " + topic + " " + tokensPerTopicK);
 				return 0;
 			}
 			else if (Double.isInfinite(logLikelihood)) {
-				logger.info("Infinite value after topic " + topic + " " + tokensPerTopic[ topic ]);
+				logger.info("Infinite value after topic " + topic + " " + tokensPerTopicK);
 				return 0;
 			}
 

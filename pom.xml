@@ -72,7 +72,23 @@
 	<!-- v6.0.0: Hyper parameter optimization support added -->
 	<!-- v6.0.1: Fixed bug which caused PolyaUrn not to set the correct Phi when called from sampleZGivenPhi. -->
 	<!-- v6.0.2: Added some convenience facilities for loading instances from string data -->
-	<version>6.0.2</version>
+	<!-- v7.0.0: Support for parallel HDP -->
+	<!-- v7.1.0: Pretty convinced we have a working implementation of the HDP now, and it is efficient -->
+	<!-- v7.2.0: Some interface cleanups -->
+	<!-- v7.2.1: Bugfix in Dirichlet normalization -->
+	<!-- v7.2.2: Reduce sensitivity in Binomial sampler test -->
+	<!-- v7.2.3: Config updates + disable HDP LL -->
+	<!-- v7.2.4: Sample Psi from prior -->
+	<!-- v7.2.5: Small cleanup of sample l. Start loop at nrTopicIndicators == 2 -->
+	<!-- v7.2.6: Calculate nominator in sample "l" on log scale to minimize risk of underflow -->
+	<!-- v8.0.0: Separated distributed version into separate repo -->
+	<!-- v8.0.1: Also calculate p in sample "l" on log scale to minimize risk of underflow -->
+	<!-- v8.0.2: Bugfix that ensures that PolyaUrn handles zero length documents properly -->
+	<!-- v8.0.3: Replaced broken retrospective sampler -->
+	<!-- v8.0.4: Finalized sampling from PPU prior -->
+	<!-- v8.0.5: Fix phi sampling for Polya Urn -->
+	<!-- v8.0.6: Minor bug fix in model log likelihood calculation, logging of topic indicators -->
+	<version>8.0.6</version>
 
 	<name>Partially Collapsed Parallel LDA</name>
 
@@ -119,26 +135,6 @@
 			<groupId>org.apache.commons</groupId>
 			<artifactId>commons-pool2</artifactId>
 			<version>2.2</version>
-		</dependency>
-		<dependency>
-			<groupId>com.typesafe.akka</groupId>
-			<artifactId>akka-actor_2.11</artifactId>
-			<version>2.4.0</version>
-		</dependency>
-		<dependency>
-			<groupId>com.typesafe.akka</groupId>
-			<artifactId>akka-remote_2.11</artifactId>
-			<version>2.4.0</version>
-		</dependency>
-		<dependency>
-			<groupId>com.typesafe.akka</groupId>
-			<artifactId>akka-contrib_2.11</artifactId>
-			<version>2.4.0</version>
-		</dependency>
-		<dependency>
-			<groupId>org.scala-lang</groupId>
-			<artifactId>scala-library</artifactId>
-			<version>2.11.5</version>
 		</dependency>
 	</dependencies>
 
@@ -230,8 +226,8 @@
 				<artifactId>maven-compiler-plugin</artifactId>
 				<version>3.1</version>
 				<configuration>
-					<source>1.7</source>
-					<target>1.7</target>
+					<source>1.8</source>
+					<target>1.8</target>
 				</configuration>
 			</plugin>
 		</plugins>

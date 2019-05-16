@@ -28,6 +28,7 @@ public class SerialCollapsedLDA extends SimpleLDA implements LDAGibbsSampler {
 	LDAConfiguration config;
 	int currentIteration = 0 ;
 	private int startSeed;
+	boolean abort = false;
 
 	// Used for inefficiency calculations
 	int [][] topIndices = null;
@@ -85,7 +86,7 @@ public class SerialCollapsedLDA extends SimpleLDA implements LDAGibbsSampler {
 			binOutput = LoggingUtils.checkCreateAndCreateDir(config.getLoggingUtil().getLogDir().getAbsolutePath() + "/binaries");
 		}
 
-		for (int iteration = 1; iteration <= iterations; iteration++) {
+		for (int iteration = 1; iteration <= iterations && !abort; iteration++) {
 			currentIteration = iteration;
 
 			long iterationStart = System.currentTimeMillis();
@@ -331,7 +332,7 @@ public class SerialCollapsedLDA extends SimpleLDA implements LDAGibbsSampler {
 	}
 
 	@Override
-	public ArrayList<TopicAssignment> getDataset() {
+	public ArrayList<TopicAssignment> getData() {
 		return data;
 	}
 	
@@ -457,5 +458,30 @@ public class SerialCollapsedLDA extends SimpleLDA implements LDAGibbsSampler {
 			alphaVect[i] = alpha / numTopics;
 		}
 		return alphaVect;
+	}
+
+	@Override
+	public void abort() {
+		abort = true;
+	}
+
+	@Override
+	public boolean getAbort() {
+		return abort;
+	}
+
+	@Override
+	public InstanceList getDataset() {
+		throw new NotImplementedException();
+	}
+	
+	@Override
+	public double[] getLogLikelihood() {
+		return null;
+	}
+
+	@Override
+	public double[] getHeldOutLogLikelihood() {
+		return null;
 	}
 }

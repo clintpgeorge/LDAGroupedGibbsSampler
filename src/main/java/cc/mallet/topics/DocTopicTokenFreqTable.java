@@ -1,18 +1,10 @@
 package cc.mallet.topics;
 
-import java.util.ArrayList;
-import java.util.List;
 import java.util.concurrent.atomic.AtomicInteger;
 
-import org.apache.commons.lang.ArrayUtils;
-
-import it.unimi.dsi.fastutil.ints.Int2ObjectAVLTreeMap;
-import it.unimi.dsi.fastutil.ints.Int2ObjectSortedMap;
-import it.unimi.dsi.fastutil.ints.Int2ObjectSortedMaps;
-
 /**
- * A frequency table that holds a frequency table per topic.
- * The frequency table tells how many documents that contain a
+ * A structure that holds a frequency table per topic.
+ * The frequency table tells us how many documents that contain a
  * set of frequencies per topic
  * 
  * I.e for topic 3, the map might be
@@ -25,7 +17,7 @@ import it.unimi.dsi.fastutil.ints.Int2ObjectSortedMaps;
  *  3 docs have 6 topic indicators of topic 3  
  *  1 docs have 7 topic indicators of topic 3   
  * 
- *  A matrix Q_{kp} of size K \times \max{n_d}, wher k is topic and p is the m_dk frequency.
+ *  A matrix Q_{kp} of size K \times \max{n_d}, where k is topic and p is the m_dk frequency.
  *     [ 0  0  0  0 0 0 0 ]
  * Q = [ 0  0  0  0 0 0 0 ]
  *     [ 4 10 50 12 7 3 1 ]
@@ -41,26 +33,79 @@ import it.unimi.dsi.fastutil.ints.Int2ObjectSortedMaps;
  */
 public class DocTopicTokenFreqTable {
 
-	Int2ObjectSortedMap<AtomicInteger> [] docTokenFreqMap;
+	AtomicInteger [][] docTokenFreqMap;
 	int numTopics;
+	int maxFreq = -1;
+	boolean [] nonEmptyTopics;
 
-	public DocTopicTokenFreqTable(int numTopics) {
+	public DocTopicTokenFreqTable(int numTopics, int maxFreq) {
 		this.numTopics = numTopics;
-		docTokenFreqMap = new Int2ObjectSortedMap[numTopics]; 
-		// Initialize
+		this.maxFreq = maxFreq;
+		docTokenFreqMap = new AtomicInteger[numTopics][maxFreq+1];
+		nonEmptyTopics = new boolean[numTopics];
+		// Initialize 
 		for (int topic = 0; topic < numTopics; topic++) {			
-			docTokenFreqMap[topic] =  Int2ObjectSortedMaps.synchronize(new Int2ObjectAVLTreeMap<AtomicInteger>());
+			//docTokenFreqMap[topic] =  Int2ObjectSortedMaps.synchronize(new Int2ObjectAVLTreeMap<AtomicInteger>());
+			for(int tokenFreq = 0; tokenFreq <= maxFreq; tokenFreq++) {
+				docTokenFreqMap[topic][tokenFreq] = new AtomicInteger();
+			}
+		}
+	}
+	
+	public void reset() {
+		for (int topic = 0; topic < numTopics; topic++) {
+			if(nonEmptyTopics[topic]) {
+				nonEmptyTopics[topic] = false;
+				for(int tokenFreq = 0; tokenFreq <= maxFreq; tokenFreq++) {
+					docTokenFreqMap[topic][tokenFreq].set(0);
+				}
+			}
+		}
+	}
+	
+	/**
+	 * 
+	 * Allows for parallel reset of this table, since
+	 * the sampler can reset it when it is finished with 
+	 * the topic. In this way we save looping over all of the
+	 * topics in serial in postPhi
+	 * 
+	 * @param topic
+	 */
+	public void reset(int topic) {
+		if(nonEmptyTopics[topic]) {
+			nonEmptyTopics[topic] = false;
+			for(int tokenFreq = 0; tokenFreq <= maxFreq; tokenFreq++) {
+				docTokenFreqMap[topic][tokenFreq].set(0);
+			}
 		}
 	}
 
+//  I leave this as an example of perf. optimization
+//  This original version caused this function
+//  to represent 35% of the total sampling time!!
+//	In the updated version above, it is completely 
+//	gone and total CPU utilization went from 33 % to 84%!!!
+	
+//	public void resetOrig() {
+//		for (int topic = 0; topic < numTopics; topic++) {
+//			nonEmptyTopics[topic] = false;
+//			for(int tokenFreq = 0; tokenFreq <= maxFreq; tokenFreq++) {
+//				docTokenFreqMap[topic].get(tokenFreq).set(0);
+//			}
+//		}
+//	}
+
 	public void increment(int topic, int tokenFreq) {
 		if(topic<0||topic>=numTopics) {
-			throw new IndexOutOfBoundsException("DocTopicTokenFreqTable only contains " + numTopics + " topics. " + topic + " is out of range");
+			throw new IndexOutOfBoundsException("DocTopicTokenFreqTable only contains " + numTopics + " topics. " + topic + " which is out of range");
 		}
-		if(docTokenFreqMap[topic].get(tokenFreq)==null) {
-			docTokenFreqMap[topic].put(tokenFreq, new AtomicInteger(0));
+		if(tokenFreq > maxFreq) {
+			throw new IndexOutOfBoundsException("DocTopicTokenFreqTable initiated with 'maxFreq' " + maxFreq 
+					+ "  but called with 'tokenFreq' " + tokenFreq + " is out of range");
 		}
-		docTokenFreqMap[topic].get(tokenFreq).incrementAndGet();
+		docTokenFreqMap[topic][tokenFreq].getAndIncrement();
+		nonEmptyTopics[topic] = tokenFreq > 0;
 	}
 
 	/**
@@ -70,20 +115,26 @@ public class DocTopicTokenFreqTable {
 	 * "How many documents (Y) have more than X number of topic indicators for topic K"
 	 * 
 	 *  A matrix D(k,j) of size K \times \max{n_d}, where k is topic and j is the number of document with at least j topic indicators.
+	 *  Where \max{n_d} is the length of the longest document in the corpus
 	 * 
-         *          [ 0   0  0  0  0 0 0 ]
-         * D(k,j) = [ 0   0  0  0  0 0 0 ]
-         *          [ 87 83 73 23 11 4 1 ]
+     *          [ 0   0  0  0  0 0 0 ]
+     * D(k,j) = [ 0   0  0  0  0 0 0 ]
+     *          [ 87 83 73 23 11 4 1 ]
+     *          
+     * Observe, index 0 in reverse cumultive sum is the number of documents that has more than ONE topic indicator allocated to it
+     *          
 	 * @param topic Which topic frequency table to return
 	 * @return Reverse Cumulative Frequency table
 	 */
 	// TODO: Fix test suite with example
 	public int [] getReverseCumulativeSum(int topic) {
-		Int2ObjectSortedMap<AtomicInteger> countTable = docTokenFreqMap[topic];
+		AtomicInteger [] countTable = docTokenFreqMap[topic];
 
 		int maxIdx = 0;
-		for (int key : countTable.keySet()) {
-			if(key>maxIdx) {
+		int [] map = new int[countTable.length]; 
+		for (int key = 0; key < countTable.length; key++) {
+			map[key] = countTable[key].intValue();
+			if(key>maxIdx && map[key] !=0) {
 				maxIdx = key; 
 			}
 		}
@@ -92,12 +143,10 @@ public class DocTopicTokenFreqTable {
 
 		int cumsum = 0;
 		for (int key = maxIdx; key > 0; key--) {
-			if(countTable.get(key)!=null) {
-				cumsum += countTable.get(key).get();
-				intArray[key-1] = cumsum;
-			} else {
-				intArray[key-1] = cumsum;
-			}
+			if(map[key]!=0) {
+				cumsum += map[key];
+			} 
+			intArray[key-1] = cumsum;
 		}
 
 		return intArray;
@@ -105,11 +154,11 @@ public class DocTopicTokenFreqTable {
 
 	public String toString() {
 		String str = "";
-		for (int topic = 0; topic < docTokenFreqMap.length; topic++) {	
-			Int2ObjectSortedMap<AtomicInteger> countTable = docTokenFreqMap[topic];
+		for (int topic = 0; topic < docTokenFreqMap.length; topic++) {
+			AtomicInteger [] countTable = docTokenFreqMap[topic];
 			str += "\t[" + topic + "]: ";
-			for (int key : countTable.keySet()) {
-				str += "(" + key + "=>" + countTable.get(key).get() + "),"; 
+			for(int tokenFreq = 0; tokenFreq <= maxFreq; tokenFreq++) {
+				str += "(" + tokenFreq + "=>" + countTable[tokenFreq].intValue() + "),"; 
 			}
 			str += "\n";
 		}
@@ -117,27 +166,39 @@ public class DocTopicTokenFreqTable {
 	}
 
 	public int[] getEmptyTopics() {
-		List<Integer> emptyTopics = new ArrayList<Integer>();
-		
-		for (int topic = 0; topic < numTopics; topic++) {
-			if(getReverseCumulativeSum(topic).length==0) {
-				emptyTopics.add(topic);
+		int emptyCnt = 0;
+		for(int i = 0; i < nonEmptyTopics.length; i++) {
+			if(!nonEmptyTopics[i]) {
+				emptyCnt++;
 			}
 		}
-		
-		int[] intArray = ArrayUtils.toPrimitive(emptyTopics.toArray(new Integer[0]));
-		return intArray;
 
+		int [] emptyTopics = new int[emptyCnt];
+		int cnt = 0;
+		for(int i = 0; i < nonEmptyTopics.length; i++) {
+			if(!nonEmptyTopics[i]) {
+				emptyTopics[cnt++] = i;
+			}
+		}
+		return emptyTopics;
 	}
-
+	
 	public int getNumTopics() {
 		return numTopics;
 	}
 
+	// TODO: This should be thread safe
+	// But it is hard to make it thread safe without introducing a global
+	// lock on the class, and we don't want to do that since that would
+	// degrade performance on increment and we don't want that
+	// WARNING: Not thread safe, should not be called from multiple threads
 	public void moveTopic(int oldTopicPos, int newTopicPos) {
-		Int2ObjectSortedMap<AtomicInteger> tmp = docTokenFreqMap[newTopicPos];
+		AtomicInteger [] tmp = docTokenFreqMap[newTopicPos];
 		docTokenFreqMap[newTopicPos] = docTokenFreqMap[oldTopicPos];
 		docTokenFreqMap[oldTopicPos] = tmp;
+		boolean et = nonEmptyTopics[newTopicPos];
+		nonEmptyTopics[newTopicPos] = nonEmptyTopics[oldTopicPos];
+		nonEmptyTopics[oldTopicPos] = et;
 	}
 
 }

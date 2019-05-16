@@ -70,7 +70,7 @@ public class BatchBuilderTest {
 		public void setZIndicators(int[][] zIndicators) {}
 
 		@Override
-		public ArrayList<TopicAssignment> getDataset() {return null;}
+		public InstanceList getDataset() {return null;}
 
 		@Override
 		public int[][] getDeltaStatistics() {return null;}
@@ -165,7 +165,7 @@ public class BatchBuilderTest {
 
 		@Override
 		public ArrayList<TopicAssignment> getData() {
-			return getDataset();
+			return null;
 		}
 
 		@Override
@@ -180,6 +180,26 @@ public class BatchBuilderTest {
 
 		@Override
 		public double[] getAlpha() {
+			return null;
+		}
+
+		@Override
+		public void abort() {
+			
+		}
+
+		@Override
+		public boolean getAbort() {
+			return false;
+		}
+
+		@Override
+		public double[] getLogLikelihood() {
+			return null;
+		}
+
+		@Override
+		public double[] getHeldOutLogLikelihood() {
 			return null;
 		}
 	}

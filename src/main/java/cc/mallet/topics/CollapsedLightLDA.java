@@ -290,7 +290,8 @@ public class CollapsedLightLDA extends ModifiedSimpleLDA implements LDAGibbsSamp
 	 * Imports the training instances and initializes the LDA model internals.
 	 */
 	@Override
-	public void addInstances (InstanceList training) {		
+	public void addInstances (InstanceList training) {	
+		trainingData = training;
 		alphabet = training.getDataAlphabet();
 		targetAlphabet = training.getTargetAlphabet();
 		numTypes = alphabet.size();
@@ -906,8 +907,8 @@ public class CollapsedLightLDA extends ModifiedSimpleLDA implements LDAGibbsSamp
 		int [] tokenSequence = tokens.getFeatures();
 		int [] oneDocTopics = topics.getFeatures();
 
-		double[] localTopicCounts = new double[numTopics];
-		double[] localTopicCounts_i = new double[numTopics];
+		int[] localTopicCounts = new int[numTopics];
+		int[] localTopicCounts_i = new int[numTopics];
 		
 		// Populate topic counts
 		int nonZeroTopicCnt = 0; // Only needed for statistics
@@ -1047,7 +1048,7 @@ public class CollapsedLightLDA extends ModifiedSimpleLDA implements LDAGibbsSamp
 
 
 	static double calculateDocumentAcceptanceProbability(int[][] globalTypeTopicCounts, int[] globalTokensPerTopic,
-			double[] localTopicCounts, double[] localTopicCounts_i, int type, int oldTopic,
+			int[] localTopicCounts, int[] localTopicCounts_i, int type, int oldTopic,
 			int docTopicIndicatorProposal, double alpha, 
 			double beta, double betaSum) {
 		
@@ -1091,7 +1092,7 @@ public class CollapsedLightLDA extends ModifiedSimpleLDA implements LDAGibbsSamp
 
 
 	static double calculateWordAcceptanceProbability(int[][] globalTypeTopicCounts, int[] globalTokensPerTopic,
-			double[] localTopicCounts_i, int type, int oldTopic, int wordTopicIndicatorProposal, double alpha, 
+			int[] localTopicCounts_i, int type, int oldTopic, int wordTopicIndicatorProposal, double alpha, 
 			double beta, double betaSum) {
 		
 		// System.out.println("type: " + type + " oldTopic: " + oldTopic + " proposal: " + wordTopicIndicatorProposal);

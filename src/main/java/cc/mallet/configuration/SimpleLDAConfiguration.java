@@ -42,6 +42,8 @@ public class SimpleLDAConfiguration implements LDAConfiguration {
 	private boolean saveTermFrequencies;
 	private String vocabularyFn;
 	private boolean saveVocabulary;
+	private String corpusFn;
+	private boolean saveCorpus;
 	private boolean printPhi;
 	private boolean measureTiming;
 	private boolean logTokensPerTopic = LDAConfiguration.LOG_TOKENS_PER_TOPIC;
@@ -69,7 +71,10 @@ public class SimpleLDAConfiguration implements LDAConfiguration {
 	private boolean symmetricAlpha = LDAConfiguration.SYMMETRIC_ALPHA_DEFAULT;
 	private double hdpGgamma = LDAConfiguration.HDP_GAMMA_DEFAULT;
 	private int hdpNrStartTopics = LDAConfiguration.HDP_START_TOPICS_DEFAULT;
-
+	private int documentSamplerSplitLimit = LDAConfiguration.DOCUMENT_SAMPLER_SPLIT_LIMIT_DEFAULT;
+	private double hdpKPercentile = LDAConfiguration.HDP_K_PERCENTILE;
+	private boolean logTopicIndicators;
+	
 	public SimpleLDAConfiguration(LoggingUtils logUtil, String scheme,
 			Integer noTopics, Double alpha, Double beta, Integer noIters,
 			Integer noBatches, Integer rareThreshold, Integer topicInterval,
@@ -166,6 +171,10 @@ public class SimpleLDAConfiguration implements LDAConfiguration {
 
 	public void setSaveVocabulary(boolean saveVocabulary) {
 		this.saveVocabulary = saveVocabulary;
+	}
+
+	public void setSaveCorpus(boolean saveCorpus) {
+		this.saveCorpus = saveCorpus;
 	}
 
 	@Override
@@ -728,4 +737,42 @@ public class SimpleLDAConfiguration implements LDAConfiguration {
 	public boolean logTokensPerTopic(boolean logTokensPerTopic) {
 		return this.logTokensPerTopic;
 	}
+
+	@Override
+	public int getDocumentSamplerSplitLimit(int documentSamplerSplitLimitDefault) {
+		return documentSamplerSplitLimit;
+	}
+
+	public void setDocumentSamplerSplitLimit(int documentSamplerSplitLimitDefault) {
+		this.documentSamplerSplitLimit = documentSamplerSplitLimitDefault;
+	}
+	
+	@Override
+	public double getHDPKPercentile(double hdpKPercentile) {
+		return this.hdpKPercentile ;
+	}
+
+	@Override
+	public boolean saveCorpus(boolean b) {
+		return saveCorpus;
+	}
+
+	@Override
+	public String getCorpusFilename() {
+		return corpusFn;
+	}
+
+	public void setCorpusFilename(String corpusFn) {
+		this.corpusFn = corpusFn;
+	}
+
+	@Override
+	public boolean logTopicIndicators(boolean b) {
+		return logTopicIndicators;
+	}
+
+	public void setLogTopicIndicators(boolean b) {
+		logTopicIndicators = b;
+	}
+
 }

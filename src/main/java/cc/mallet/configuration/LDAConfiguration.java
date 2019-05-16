@@ -26,7 +26,7 @@ public interface LDAConfiguration {
 	public static final String LOG_PHI_DENSITY_DEFAULT = null;
 	public static final int PHI_BURN_IN_DEFAULT = 0;
 	public static final int PHI_THIN_DEFAULT = 1;
-	public static final boolean SAVE_PHI_MEAN_DEFAULT = true;
+	public static final boolean SAVE_PHI_MEAN_DEFAULT = false;
 	public static final int TF_IDF_VOCAB_SIZE_DEFAULT = -1;
 	public static final int NO_TOP_WORDS_DEFAULT = 20;
 	public static final int MAX_DOC_BUFFFER_SIZE_DEFAULT = 10000;
@@ -38,9 +38,11 @@ public interface LDAConfiguration {
 	public static final String FILE_REGEX_DEFAULT = ".*\\.txt$";
 	public static final int HYPERPARAM_OPTIM_INTERVAL_DEFAULT = -1;
 	public static final boolean SYMMETRIC_ALPHA_DEFAULT = false;
-	public static final double HDP_GAMMA_DEFAULT = 5;
-	public static final int HDP_START_TOPICS_DEFAULT = NO_TOPICS_DEFAULT / 2;
+	public static final double HDP_GAMMA_DEFAULT = 1;
+	public static final int HDP_START_TOPICS_DEFAULT = 1;
 	public static final boolean LOG_TOKENS_PER_TOPIC = false;
+	public static final int DOCUMENT_SAMPLER_SPLIT_LIMIT_DEFAULT = 100;
+	public static final double HDP_K_PERCENTILE = .8;
 
 	public LoggingUtils getLoggingUtil();
 
@@ -201,4 +203,14 @@ public interface LDAConfiguration {
 	public int getHDPNrStartTopics(int hdpStartTopicsDefault);
 
 	public boolean logTokensPerTopic(boolean logTokensPerTopic);
+
+	public int getDocumentSamplerSplitLimit(int documentSamplerSplitLimitDefault);
+
+	public double getHDPKPercentile(double hdpKPercentile);
+
+	public boolean saveCorpus(boolean b);
+
+	public String getCorpusFilename();
+
+	public boolean logTopicIndicators(boolean b);
 }

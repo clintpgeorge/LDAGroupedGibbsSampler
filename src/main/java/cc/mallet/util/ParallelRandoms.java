@@ -12,13 +12,41 @@ import java.util.concurrent.ThreadLocalRandom;
 public class ParallelRandoms extends Randoms {
 
 	private static final long serialVersionUID = 2720201250960273621L;
+	
+	private static final ThreadLocal<XORShiftRandom> gaussGen = new ThreadLocal<XORShiftRandom>() {
+		@Override
+		protected XORShiftRandom initialValue() {
+			return new XORShiftRandom();
+		}
+	};
+	{
+		gaussGen.set(new XORShiftRandom());
+	}
 
+	/* (non-Javadoc)
+	 * @see cc.mallet.util.Randoms#nextGamma(double, double)
+	 */
+	@Override
+	public double nextGamma(double alpha, double beta) {
+		return rgamma(alpha, beta, 0);
+	}
+	
 	/* (non-Javadoc)
 	 * @see cc.mallet.util.Randoms#nextGamma(double, double, double)
 	 */
 	@Override
 	public double nextGamma(double alpha, double beta, double lambda) {
 		return rgamma(alpha, beta, lambda);
+	}
+	
+	public double nextBeta(double alpha, double beta) {
+		return rbeta(alpha, beta);
+	}
+	
+	public static double rbeta(double alpha, double beta) {
+		double x = rgamma(alpha, 1.0, 0);
+        double y = rgamma(beta, 1.0, 0);
+        return x / (x + y);
 	}
 	
 	/**
@@ -111,12 +139,31 @@ public class ParallelRandoms extends Randoms {
 		return params;
 	}
 	
+	
 	/**
 	 * The full Marsaglia gamma covariate sampler, for alpha > 1
 	 * @param alpha
 	 * @return gamma distributed sample
 	 */
 	protected static double prgamma(double alpha) {
+		double x,v,u;
+		double d = alpha-(1.0/3.0); 
+		double c = 1.0/Math.sqrt(9.0*d);
+		while(true) {
+			do {x=gaussGen.get().nextGaussian(); v=1.0+c*x;} while(v<=0.0);
+			v=v*v*v; 
+			u=gaussGen.get().nextDouble();
+			if( u<(1.0-0.0331*(x*x)*(x*x)) ) return (d*v);
+			if( Math.log(u)<(0.5*x*x+d*(1.0-v+Math.log(v))) ) return (d*v);
+		}
+	}
+	
+	/**
+	 * The full Marsaglia gamma covariate sampler, for alpha > 1
+	 * @param alpha
+	 * @return gamma distributed sample
+	 */
+	protected static double prgammaOrig(double alpha) {
 		double x,v,u;
 		double d = alpha-(1.0/3.0); 
 		double c = 1.0/Math.sqrt(9.0*d);

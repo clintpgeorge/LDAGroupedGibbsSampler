@@ -20,7 +20,6 @@ import cc.mallet.types.VSDirichlet;
 import cc.mallet.types.VariableSelectionDirichlet;
 import cc.mallet.types.VariableSelectionResult;
 import cc.mallet.util.IntArraySortUtils;
-import cc.mallet.util.LDAUtils;
 import cc.mallet.util.LoggingUtils;
 import cc.mallet.util.OptimizedGentleAliasMethod;
 import cc.mallet.util.WalkerAliasTable;
@@ -31,8 +30,6 @@ public class NZVSSpaliasUncollapsedParallelLDA extends UncollapsedParallelLDA im
 	WalkerAliasTable [] aliasTables; 
 	double [] typeNorm; // Array with doubles with sum of alpha * phi
 	private ExecutorService tableBuilderExecutor;
-	
-	protected double[][] phitrans;
 	
 	// #### VSSelection
 	// Jagged array containing the topics that are non-zero for each type
@@ -57,7 +54,6 @@ public class NZVSSpaliasUncollapsedParallelLDA extends UncollapsedParallelLDA im
 		alphabet = training.getDataAlphabet();
 		numTypes = alphabet.size();
 		nonZeroTypeTopicIdxs = new int[numTypes][numTopics];
-		phitrans    = new double[numTypes][numTopics];
 		nonZeroTypeTopicIdxsColLocks = new Object[numTypes];
 		nonZeroTypeTopicColIdxs = new AtomicInteger[numTypes];
 		for (int i = 0; i < numTypes; i++) {
@@ -78,9 +74,8 @@ public class NZVSSpaliasUncollapsedParallelLDA extends UncollapsedParallelLDA im
 		public WalkerAliasTableBuildResult call() {
 			double [] probs = new double[numTopics];
 			double typeMass = 0; // Type prior mass
-			double [] phiType =  phitrans[type]; 
 			for (int topic = 0; topic < numTopics; topic++) {
-				typeMass += probs[topic] = phiType[topic] * alpha[topic];
+				typeMass += probs[topic] = phi[topic][type] * alpha[topic];
 			}
 			
 			if(aliasTables[type]==null) {
@@ -102,9 +97,6 @@ public class NZVSSpaliasUncollapsedParallelLDA extends UncollapsedParallelLDA im
 
 	@Override
 	public void preIteration() {
-		
-		LDAUtils.transpose(phi, phitrans);
-		
 		final int [][] topicTypeIndices = topicIndexBuilder.getTopicTypeIndices();
 		List<ParallelTableBuilder> builders = new ArrayList<>();
 		if(topicTypeIndices!=null) {
@@ -162,7 +154,7 @@ public class NZVSSpaliasUncollapsedParallelLDA extends UncollapsedParallelLDA im
 	}
 	
 	@Override
-	protected double [] sampleTopicAssignmentsParallel(LDADocSamplingContext ctx) {
+	protected LDADocSamplingResultSparseSimple sampleTopicAssignmentsParallel(LDADocSamplingContext ctx) {
 		FeatureSequence tokens = ctx.getTokens();
 		LabelSequence topics = ctx.getTopics();
 		int myBatch = ctx.getMyBatch();
@@ -175,7 +167,7 @@ public class NZVSSpaliasUncollapsedParallelLDA extends UncollapsedParallelLDA im
 		int [] tokenSequence = tokens.getFeatures();
 		int [] oneDocTopics = topics.getFeatures();
 
-		double[] localTopicCounts = new double[numTopics];
+		int[] localTopicCounts = new int[numTopics];
 
 		// This vector contains the indices of the topics with non-zero entries.
 		// It has to be numTopics long since the non-zero topics come and go...
@@ -263,15 +255,14 @@ public class NZVSSpaliasUncollapsedParallelLDA extends UncollapsedParallelLDA im
 			} else {
 				double score;
 				int topic = nonZeroTopicsAdjusted[0];
-				double [] phiType =  phitrans[type]; 
-				score = localTopicCounts[topic] * phiType[topic];
+				score = localTopicCounts[topic] * phi[topic][type];
 				cumsum[0] = score;
 				// Now calculate and add up the scores for each topic for this word
 				// We build a cumsum indexed by topicIndex
 				int topicIdx = 1;
 				while ( topicIdx < nonZeroTopicCntAdjusted ) {
 					topic = nonZeroTopicsAdjusted[topicIdx];
-					score = localTopicCounts[topic] * phiType[topic];
+					score = localTopicCounts[topic] * phi[topic][type];
 					cumsum[topicIdx] = score + cumsum[topicIdx-1];
 					topicIdx++;
 				}
@@ -320,7 +311,7 @@ public class NZVSSpaliasUncollapsedParallelLDA extends UncollapsedParallelLDA im
 			//System.out.println("(Batch=" + myBatch + ") Incremented: topic=" + newTopic + " type=" + type + " => " + batchLocalTopicUpdates[myBatch][newTopic][type]);		
 		}
 		//System.out.println("Ratio: " + ((double)numPrior/(double)numLikelihood));
-		return localTopicCounts;
+		return new LDADocSamplingResultSparseSimple(localTopicCounts,nonZeroTopicCnt,nonZeroTopics);
 	}
 
 	/*
@@ -359,16 +350,15 @@ public class NZVSSpaliasUncollapsedParallelLDA extends UncollapsedParallelLDA im
 	double calcCumSum(int type, double[] localTopicCounts, int[] nonZeroTopics, int nonZeroTopicCnt, double[] cumsum) {
 		double score;
 		double sum;
-		double [] phiType =  phitrans[type]; 
 		int topic = nonZeroTopics[0];
-		score = localTopicCounts[topic] * phiType[topic];
+		score = localTopicCounts[topic] * phi[topic][type];
 		cumsum[0] = score;
 		// Now calculate and add up the scores for each topic for this word
 		// We build a cumsum indexed by topicIndex
 		int topicIdx = 1;
 		while ( topicIdx < nonZeroTopicCnt ) {
 			topic = nonZeroTopics[topicIdx];
-			score = localTopicCounts[topic] * phiType[topic];
+			score = localTopicCounts[topic] * phi[topic][type];
 			cumsum[topicIdx] = score + cumsum[topicIdx-1];
 			topicIdx++;
 		}

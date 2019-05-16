@@ -68,9 +68,8 @@ public class LightPCLDA extends SpaliasUncollapsedParallelLDA {
 		public WalkerAliasTableBuildResult call() {
 			double [] probs = new double[numTopics];
 			double typeMass = 0; // Type prior mass
-			double [] phiType =  phitrans[type]; 
 			for (int topic = 0; topic < numTopics; topic++) {
-				typeMass += probs[topic] = phiType[topic];
+				typeMass += probs[topic] = phi[topic][type];
 			}
 			
 			if(aliasTables[type]==null) {
@@ -84,7 +83,7 @@ public class LightPCLDA extends SpaliasUncollapsedParallelLDA {
 	}
 
 	@Override
-	protected double[] sampleTopicAssignmentsParallel(LDADocSamplingContext ctx) {
+	protected LDADocSamplingResult sampleTopicAssignmentsParallel(LDADocSamplingContext ctx) {
 		FeatureSequence tokens = ctx.getTokens();
 		LabelSequence topics = ctx.getTopics();
 		int myBatch = ctx.getMyBatch();
@@ -95,7 +94,7 @@ public class LightPCLDA extends SpaliasUncollapsedParallelLDA {
 		int [] tokenSequence = tokens.getFeatures();
 		int [] oneDocTopics = topics.getFeatures();
 
-		double[] localTopicCounts = new double[numTopics];
+		int[] localTopicCounts = new int[numTopics];
 		double[] localTopicCounts_i = new double[numTopics];
 		
 		// Populate topic counts
@@ -218,6 +217,6 @@ public class LightPCLDA extends SpaliasUncollapsedParallelLDA {
 			// Make sure the "_i" version is also up to date!
 			localTopicCounts_i[newTopic]++;
 		}
-		return localTopicCounts;
+		return new LDADocSamplingResultDense(localTopicCounts);
 	}	
 }

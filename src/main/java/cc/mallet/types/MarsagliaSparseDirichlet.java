@@ -42,11 +42,13 @@ public class MarsagliaSparseDirichlet extends ParallelDirichlet implements Spars
 			sum += distribution[i];
 		}
 
-		for (int i=0; i<distribution.length; i++) {
-			distribution[i] /= sum;
-			if (distribution[i] <= 0) {
-				distribution[i] = Double.MIN_VALUE;
-			}			
+		if(sum!=0) {
+			for (int i=0; i<distribution.length; i++) {
+				distribution[i] /= sum;
+				if (distribution[i] <= 0) {
+					distribution[i] = Double.MIN_VALUE;
+				}			
+			}
 		}
 
 		return distribution;
@@ -64,4 +66,33 @@ public class MarsagliaSparseDirichlet extends ParallelDirichlet implements Spars
 		return new VSResult(nextDistribution(counts), nonZero);
 	}
 
+	@Override
+	public VSResult nextDistributionWithSparseness(double prior) {
+		double distribution[] = new double[partition.length];
+		int [] nonZero = updateDistributionWithSparseness(distribution, prior);
+		return new VSResult(distribution, nonZero);
+	}
+
+	@Override
+	public int [] updateDistributionWithSparseness(double[] previousDistribution, double prior) {
+		int [] nonZero = new int[previousDistribution.length];  
+		double sum = 0;
+		for (int i=0; i<previousDistribution.length; i++) {
+			previousDistribution[i] = ParallelRandoms.rgamma(prior + previousDistribution[i], 1, 0);
+			sum += previousDistribution[i];
+			nonZero[i] = i;
+		}
+
+		if(sum!=0) {
+			for (int i=0; i<previousDistribution.length; i++) {
+				previousDistribution[i] /= sum;
+				if (previousDistribution[i] <= 0) {
+					previousDistribution[i] = Double.MIN_VALUE;
+				}			
+			}
+		}
+		return nonZero;
+	}
+
+	
 }
