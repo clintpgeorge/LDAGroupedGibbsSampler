@@ -230,6 +230,32 @@
 					<target>1.8</target>
 				</configuration>
 			</plugin>
+			<!--https://stackoverflow.com/questions/20959505/running-mallet-in-java-->
+			<!--We have to use this complicated process to copy the logging.properties file to the right location -->
+			<plugin>
+				<artifactId>maven-resources-plugin</artifactId>
+				<version>2.6</version>
+				<executions>
+					<execution>
+						<id>copy-resources</id>
+						<phase>validate</phase>
+						<goals>
+							<goal>copy-resources</goal>
+						</goals>
+						<configuration>
+							<outputDirectory>
+								${basedir}/target/classes/cc/mallet/util/resources
+							</outputDirectory>
+							<resources>
+								<resource>
+									<directory>src/main/java/cc/mallet/util/resources</directory>
+									<filtering>true</filtering>
+								</resource>
+							</resources>
+						</configuration>
+					</execution>
+				</executions>
+			</plugin>
 		</plugins>
 	</build>
 </project>

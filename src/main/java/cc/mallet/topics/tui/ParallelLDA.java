@@ -160,7 +160,7 @@ public class ParallelLDA implements IterationListener {
 					System.out.println("Using TEST dataset: " + config.getTestDatasetFilename());
 				}
 				String whichModel = config.getScheme();
-				System.out.println("Scheme: " + whichModel);
+				System.out.println("\nScheme: " + whichModel);
 
 				InstanceList instances = LDAUtils.loadDataset(config, dataset_fn);
 				instances.getAlphabet().stopGrowth();
@@ -197,7 +197,7 @@ public class ParallelLDA implements IterationListener {
 					model.addTestInstances(testInstances);
 				}
 			
-				System.out.println("Loaded " + model.getDataset().size() + " documents, with " + model.getCorpusSize() + " words in total.");
+				System.out.println("Loaded " + model.getDataset().size() + " documents, with " + model.getCorpusSize() + " words in total.\n\n");
 
 				System.out.println("Starting iterations (" + config.getNoIterations(LDAConfiguration.NO_ITER_DEFAULT) + " total).");
 				System.out.println("_____________________________\n");
@@ -208,7 +208,7 @@ public class ParallelLDA implements IterationListener {
 				t.start();
 				model.sample(config.getNoIterations(LDAConfiguration.NO_ITER_DEFAULT));
 				t.stop();
-				System.out.println("Finished:" + new Date());
+				System.out.println("Finished:" + new Date() + "\n\n");
 				
 				int requestedWords = config.getNrTopWords(LDAConfiguration.NO_TOP_WORDS_DEFAULT);
 				//System.out.println("Topic model diagnostics:");
@@ -470,7 +470,7 @@ public class ParallelLDA implements IterationListener {
 		}
 		case "collapsed": {
 			model = new SerialCollapsedLDA(config);
-			System.out.println("Uncollapsed Parallell LDA.");
+			System.out.println("Collapsed Serial LDA.");
 			break;
 		}
 		case "lightcollapsed": {

@@ -13,6 +13,7 @@ import cc.mallet.topics.SimpleLDA;
 import cc.mallet.topics.TopicAssignment;
 import cc.mallet.types.Dirichlet;
 import cc.mallet.types.FeatureSequence;
+import cc.mallet.types.Instance;
 import cc.mallet.types.InstanceList;
 import cc.mallet.types.LabelSequence;
 import cc.mallet.util.LDAUtils;
@@ -29,6 +30,9 @@ public class SerialCollapsedLDA extends SimpleLDA implements LDAGibbsSampler {
 	int currentIteration = 0 ;
 	private int startSeed;
 	boolean abort = false;
+
+	// The original training data
+	InstanceList trainingData;
 
 	// Used for inefficiency calculations
 	int [][] topIndices = null;
@@ -472,7 +476,7 @@ public class SerialCollapsedLDA extends SimpleLDA implements LDAGibbsSampler {
 
 	@Override
 	public InstanceList getDataset() {
-		throw new NotImplementedException();
+		return trainingData;
 	}
 	
 	@Override
@@ -483,5 +487,38 @@ public class SerialCollapsedLDA extends SimpleLDA implements LDAGibbsSampler {
 	@Override
 	public double[] getHeldOutLogLikelihood() {
 		return null;
+	}
+
+
+	public void addInstances (InstanceList training) {
+		trainingData = training;
+		alphabet = training.getDataAlphabet();
+		numTypes = alphabet.size();
+
+		betaSum = beta * numTypes;
+
+		typeTopicCounts = new int[numTypes][numTopics];
+
+		for (Instance instance : training) {
+
+			FeatureSequence tokens = (FeatureSequence) instance.getData();
+			LabelSequence topicSequence =
+					new LabelSequence(topicAlphabet, new int[ tokens.size() ]);
+
+			int[] topics = topicSequence.getFeatures();
+			for (int position = 0; position < tokens.size(); position++) {
+
+				int topic = random.nextInt(numTopics);
+				topics[position] = topic;
+				tokensPerTopic[topic]++;
+
+				int type = tokens.getIndexAtPosition(position);
+				typeTopicCounts[type][topic]++;
+			}
+
+			TopicAssignment t = new TopicAssignment (instance, topicSequence);
+			data.add (t);
+		}
+
 	}
 }
