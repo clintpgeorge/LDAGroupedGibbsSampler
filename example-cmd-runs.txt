@@ -1,0 +1,2 @@
+mvn package -DskipTests
+java -jar target/PCPLDA-8.1.0.jar --run_cfg=src/main/resources/configuration/plda.cfg

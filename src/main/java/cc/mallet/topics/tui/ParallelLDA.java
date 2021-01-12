@@ -9,6 +9,7 @@ import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Date;
 import java.util.List;
+import java.util.concurrent.TimeUnit;
 
 import cc.mallet.configuration.ConfigFactory;
 import cc.mallet.configuration.Configuration;
@@ -20,6 +21,8 @@ import cc.mallet.topics.CollapsedLightLDA;
 import cc.mallet.topics.EfficientUncollapsedParallelLDA;
 import cc.mallet.topics.HDPSamplerWithPhi;
 import cc.mallet.topics.LDAGibbsSampler;
+import cc.mallet.topics.LDAGroupedGibbsSampler;
+import cc.mallet.topics.LDAGroupedGibbsSamplerTest;
 import cc.mallet.topics.LDASamplerWithCallback;
 import cc.mallet.topics.LDASamplerWithPhi;
 import cc.mallet.topics.LightPCLDA;
@@ -154,7 +157,7 @@ public class ParallelLDA implements IterationListener {
 				System.out.println("Using Config: " + config.whereAmI());
 				System.out.println("Runnin subconfig: " + conf);
 				String dataset_fn = config.getDatasetFilename();
-				System.out.println("# topics: " + config.getNoTopics(-1));
+				System.out.println("Number of topics: " + config.getNoTopics(-1));
 				System.out.println("Using dataset: " + dataset_fn);
 				if(config.getTestDatasetFilename()!=null) {
 					System.out.println("Using TEST dataset: " + config.getTestDatasetFilename());
@@ -175,20 +178,22 @@ public class ParallelLDA implements IterationListener {
 				}
 				
 				model.setRandomSeed(commonSeed);
-				if(config.getTfIdfVocabSize(LDAConfiguration.TF_IDF_VOCAB_SIZE_DEFAULT)>0) {
-					System.out.println(String.format("Top TF-IDF threshold: %d", config.getTfIdfVocabSize(LDAConfiguration.TF_IDF_VOCAB_SIZE_DEFAULT)));
+				if (config.getTfIdfVocabSize(LDAConfiguration.TF_IDF_VOCAB_SIZE_DEFAULT) > 0) {
+					System.out.println(String.format("Top TF-IDF threshold: %d",
+							config.getTfIdfVocabSize(LDAConfiguration.TF_IDF_VOCAB_SIZE_DEFAULT)));
 				} else {
-					System.out.println(String.format("Rare word threshold: %d", config.getRareThreshold(LDAConfiguration.RARE_WORD_THRESHOLD)));
+					System.out.println(String.format("Rare word threshold: %d",
+							config.getRareThreshold(LDAConfiguration.RARE_WORD_THRESHOLD)));
 				}
 				
 
-				System.out.println("Vocabulary size: " + instances.getDataAlphabet().size() + "\n");
-				System.out.println("Instance list is: " + instances.size());
+				System.out.println("Vocabulary size: " + instances.getDataAlphabet().size());
+				System.out.println("Number of documents: " + instances.size());
 				System.out.println("Loading data instances...");
 
 				// Sets the frequent with which top words for each topic are printed
 				//model.setShowTopicsInterval(config.getTopicInterval(LDAConfiguration.TOPIC_INTER_DEFAULT));
-				System.out.println("Config seed:" + config.getSeed(LDAConfiguration.SEED_DEFAULT));
+				System.out.println("Config seed: " + config.getSeed(LDAConfiguration.SEED_DEFAULT));
 				System.out.println("Start seed: " + model.getStartSeed());
 				// Imports the data into the model
 				model.addInstances(instances);
@@ -196,19 +201,22 @@ public class ParallelLDA implements IterationListener {
 					InstanceList testInstances = LDAUtils.loadDataset(config, config.getTestDatasetFilename(),instances.getAlphabet());
 					model.addTestInstances(testInstances);
 				}
-			
 				System.out.println("Loaded " + model.getDataset().size() + " documents, with " + model.getCorpusSize() + " words in total.\n\n");
 
 				System.out.println("Starting iterations (" + config.getNoIterations(LDAConfiguration.NO_ITER_DEFAULT) + " total).");
 				System.out.println("_____________________________\n");
 
 				// Runs the model
-				System.out.println("Starting:" + new Date());
+				System.out.println("Starting:" + new Date() + "\n");
+				long startTime = System.nanoTime();
 				Timer t = new Timer();
 				t.start();
 				model.sample(config.getNoIterations(LDAConfiguration.NO_ITER_DEFAULT));
 				t.stop();
-				System.out.println("Finished:" + new Date() + "\n\n");
+				System.out.println("\nFinished:" + new Date() + "\n");
+				long endTime = System.nanoTime();
+				long totalTime = TimeUnit.NANOSECONDS.toSeconds(endTime - startTime);
+				System.out.println("Execution time: " + totalTime + " seconds \n");
 				
 				int requestedWords = config.getNrTopWords(LDAConfiguration.NO_TOP_WORDS_DEFAULT);
 				//System.out.println("Topic model diagnostics:");
@@ -317,14 +325,14 @@ public class ParallelLDA implements IterationListener {
 								model.getNoTopics(), 
 								model.getTypeTopicMatrix(), 
 								model.getAlphabet())));
-				System.out.println("Relevance words are: \n" + 
-						LDAUtils.formatTopWords(LDAUtils.getTopRelevanceWords(requestedWords, 
-								model.getAlphabet().size(), 
-								model.getNoTopics(), 
-								model.getTypeTopicMatrix(),  
-								config.getBeta(LDAConfiguration.BETA_DEFAULT),
-								config.getLambda(LDAConfiguration.LAMBDA_DEFAULT), 
-								model.getAlphabet())));
+				// System.out.println("Relevance words are: \n" + 
+				// 		LDAUtils.formatTopWords(LDAUtils.getTopRelevanceWords(requestedWords, 
+				// 				model.getAlphabet().size(), 
+				// 				model.getNoTopics(), 
+				// 				model.getTypeTopicMatrix(),  
+				// 				config.getBeta(LDAConfiguration.BETA_DEFAULT),
+				// 				config.getLambda(LDAConfiguration.LAMBDA_DEFAULT), 
+				// 				model.getAlphabet())));
 //				System.out.println("Salient words are: \n" + 
 //						LDAUtils.formatTopWords(LDAUtils.getTopSalientWords(20, 
 //								model.getAlphabet().size(), 
@@ -457,7 +465,17 @@ public class ParallelLDA implements IterationListener {
 
 	public static LDAGibbsSampler createModel(LDAConfiguration config, String whichModel) {
 		LDAGibbsSampler model;
-		switch(whichModel) {
+		switch(whichModel) {			
+		case "ggs": {
+			model = new LDAGroupedGibbsSampler(config);
+			System.out.println("LDA Grouped Gibbs Sampler.");
+			break;
+		}
+		case "ggs2": {
+			model = new LDAGroupedGibbsSamplerTest(config);
+			System.out.println("LDA Grouped Gibbs Sampler with Sparse Topic Dirichlet Sampling (valid?).");
+			break;
+		}
 		case "adlda": {
 			model = new ADLDA(config);
 			System.out.println("ADLDA.");

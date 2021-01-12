@@ -154,11 +154,11 @@ public class SparseDirichletDrawParameterizedTest {
 		//System.out.println("Time Plain: " + (System.currentTimeMillis() - tp));
 		double pval = ks.kolmogorovSmirnovTest(d1s, d2s);
 
-//		System.out.println("Counts:");
-//		for (int i = 0; i < counts.length; i++) {
-//			System.out.print(counts[i]  + ", ");
-//		}
-//		System.out.println();
+		System.out.println("Counts:");
+		for (int i = 0; i < counts.length; i++) {
+			System.out.print(counts[i]  + ", ");
+		}
+		System.out.println();
 
 		assertTrue("Pval is: " + pval, pval > 0.00001);
 	}

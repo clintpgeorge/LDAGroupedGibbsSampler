@@ -30,3 +30,6 @@ target/*
 .project
 .classpath
 .vscode/*
+
+# Mac files 
+.DS_Store 
