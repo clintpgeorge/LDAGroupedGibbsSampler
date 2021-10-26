@@ -348,6 +348,34 @@ public class ParsedLDAConfiguration extends SubConfig implements Configuration, 
 		return getInteger("phi_mean_thin", phiMeanThinDefault);
 	}
 	
+	// --- added on July 10, 2021 --- 
+
+	// @Override
+	// public boolean saveTheta(boolean detaultValue){
+	// 	String key = "save_theta";
+	// 	Object prop = super.getProperty(translateKey(key));
+	// 	if(prop == null) return detaultValue;
+	// 	return getBooleanProperty(key);
+	// }
+
+	// @Override
+	// public int getThetaThin(int thetaThinDefault){
+	// 	return getInteger("theta_thin", thetaThinDefault);
+	// }
+
+	// @Override
+	// public int getThetaBurnIn(int thetaBurnInDefault){
+	// 	return getInteger("theta_burnin", thetaBurnInDefault);
+	// }
+	
+	@Override
+	public int getMaxExecTimeSeconds(int maxExecTime){
+		return getInteger("exec_time", maxExecTime);
+	}
+
+
+	// ----------- plda --------------
+
 	@Override
 	public Integer getTfIdfVocabSize(int defaultValue) {
 		return getInteger("tfidf_vocab_size",defaultValue);
@@ -504,5 +532,9 @@ public class ParsedLDAConfiguration extends SubConfig implements Configuration, 
 		return getBooleanProperty(key);
 	}
 
+	@Override
+	public boolean computeLikelihood(){
+		return getBooleanProperty("compute_likelihood"); 
+	}
 
 }

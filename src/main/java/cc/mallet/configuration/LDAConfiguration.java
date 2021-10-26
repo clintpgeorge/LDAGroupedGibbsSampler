@@ -27,6 +27,13 @@ public interface LDAConfiguration {
 	public static final int PHI_BURN_IN_DEFAULT = 0;
 	public static final int PHI_THIN_DEFAULT = 1;
 	public static final boolean SAVE_PHI_MEAN_DEFAULT = false;
+	// --- added on July 10, 2021 --- 
+	// public static final int THETA_BURN_IN_DEFAULT = 0;
+	// public static final int THETA_THIN_DEFAULT = 1;
+	// public static final boolean SAVE_THETA_DEFAULT = false;
+
+	public static final int EXEC_TIME_DEFAULT = 10; 
+	// ----------- plda --------------
 	public static final int TF_IDF_VOCAB_SIZE_DEFAULT = -1;
 	public static final int NO_TOP_WORDS_DEFAULT = 20;
 	public static final int MAX_DOC_BUFFFER_SIZE_DEFAULT = 10000;
@@ -43,6 +50,8 @@ public interface LDAConfiguration {
 	public static final boolean LOG_TOKENS_PER_TOPIC = false;
 	public static final int DOCUMENT_SAMPLER_SPLIT_LIMIT_DEFAULT = 100;
 	public static final double HDP_K_PERCENTILE = .8;
+	public static final boolean COMPUTE_LIKELIHOOD = true;
+	public boolean computeLikelihood();
 
 	public LoggingUtils getLoggingUtil();
 
@@ -181,6 +190,18 @@ public interface LDAConfiguration {
 	public String getDocumentTopicThetaOutputFilename();
 
 	public boolean saveDocumentThetaEstimate();
+
+	// --- added on July 10, 2021 --- 
+
+	// public boolean saveTheta(boolean detaultValue);
+
+	// public int getThetaThin(int thetaThinDefault);
+
+	// public int getThetaBurnIn(int thetaBurnInDefault);
+
+	public int getMaxExecTimeSeconds(int maxExecTime); 
+
+	// ----------- plda --------------
 
 	public String getDirichletSamplerBuilderClass(String samplerBuilderClassName);
 

@@ -4,13 +4,14 @@ import java.io.File;
 import java.io.IOException;
 import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.concurrent.TimeUnit;
 import java.util.logging.Logger;
 
 import org.apache.commons.lang.NotImplementedException;
 
 import cc.mallet.configuration.LDAConfiguration;
-import cc.mallet.topics.SimpleLDA;
-import cc.mallet.topics.TopicAssignment;
+// import cc.mallet.topics.SimpleLDA;
+// import cc.mallet.topics.TopicAssignment;
 import cc.mallet.types.Dirichlet;
 import cc.mallet.types.FeatureSequence;
 import cc.mallet.types.Instance;
@@ -73,10 +74,15 @@ public class SerialCollapsedLDA extends SimpleLDA implements LDAGibbsSampler {
 
 	@Override
 	public void sample (int iterations) throws IOException {
+		boolean computeLikelihood = config.computeLikelihood();
 		String loggingPath = config.getLoggingUtil().getLogDir().getAbsolutePath();
-		double logLik = modelLogLikelihood();
-		String tw = topWords (wordsPerTopic);
-		LDAUtils.logLikelihoodToFile(logLik,0,tw,loggingPath,logger);
+		double logLik; 
+		String tw; 
+		if (computeLikelihood) {
+			logLik = modelLogLikelihood();
+			tw = topWords(wordsPerTopic);
+			LDAUtils.logLikelihoodToFile(logLik, 0, tw, loggingPath, logger);
+		}
 		
 		int [] printFirstNDocs = config.getPrintNDocsInterval();
 		int nDocs = config.getPrintNDocs();
@@ -89,11 +95,29 @@ public class SerialCollapsedLDA extends SimpleLDA implements LDAGibbsSampler {
 		if(output_interval.length>1||printFirstNDocs.length>1||printFirstNTopWords.length>1) {
 			binOutput = LoggingUtils.checkCreateAndCreateDir(config.getLoggingUtil().getLogDir().getAbsolutePath() + "/binaries");
 		}
+		
+		// --- plda: added on July 10, 2021 --- 
+		File asciiOutput = null;
+		if (output_interval.length > 1 || printFirstNDocs.length > 1 || printFirstNTopWords.length > 1) {
+			asciiOutput = LoggingUtils.checkCreateAndCreateDir(config.getLoggingUtil().getLogDir().getAbsolutePath() + "/ascii");
+		}
+
+		long maxExecTimeMillis = TimeUnit.MILLISECONDS.convert(config.getMaxExecTimeSeconds(LDAConfiguration.EXEC_TIME_DEFAULT), TimeUnit.SECONDS); 
+		// long maxExecTimeNano = TimeUnit.NANOSECONDS.convert(config.getMaxExecTimeMin(LDAConfiguration.EXEC_TIME_DEFAULT), TimeUnit.MINUTES); 
+		System.out.println("\nMax exec time (millseconds) = " + maxExecTimeMillis + "\n");
+		// System.out.println("\nMax exec time (nanoseconds) = " + maxExecTimeNano + "\n");
+
+		// ----------- plda --------------
+
+
+		long zSamplingTime = 0; 
+		// long zSamplingNano = 0; 
 
 		for (int iteration = 1; iteration <= iterations && !abort; iteration++) {
 			currentIteration = iteration;
 
 			long iterationStart = System.currentTimeMillis();
+			// long startNano = System.nanoTime(); 
 
 			// Loop over every document in the corpus
 			for (int doc = 0; doc < data.size(); doc++) {
@@ -106,6 +130,9 @@ public class SerialCollapsedLDA extends SimpleLDA implements LDAGibbsSampler {
 			}
 
 			long elapsedMillis = System.currentTimeMillis();
+			// long elapsedNano = System.nanoTime();
+			zSamplingTime += (elapsedMillis - iterationStart); // accumulate the time 
+			// zSamplingNano += (elapsedNano - startNano); // accumulate the time 
 			logger.fine(iteration + "\t" + (elapsedMillis - iterationStart) + "ms\t");
 
 			if(config!= null) { 
@@ -117,18 +144,22 @@ public class SerialCollapsedLDA extends SimpleLDA implements LDAGibbsSampler {
 				LDAUtils.writeBinaryIntMatrix(LDAUtils.getDocumentTopicCounts(data, numTopics), iteration, data.size(), numTopics, binOutput.getAbsolutePath() + "/Serial_M");
 			}
 
-			if (showTopicsInterval > 0 && iteration % showTopicsInterval == 0) {
+			if (showTopicsInterval > 0 && iteration % showTopicsInterval == 0 && computeLikelihood) {
 				if(config!= null) { 
 					logLik = modelLogLikelihood();
 					tw = topWords (wordsPerTopic);
-					loggingPath = config.getLoggingUtil().getLogDir().getAbsolutePath();
+					// loggingPath = config.getLoggingUtil().getLogDir().getAbsolutePath();
 					LDAUtils.logLikelihoodToFile(logLik,iteration,tw,loggingPath,logger);
 				}
 			}
 			if( printFirstNDocs.length > 1 && LDAUtils.inRangeInterval(iteration, printFirstNDocs)) {
 				int [][] docTopicCounts = LDAUtils.getDocumentTopicCounts(data, numTopics, nDocs);
-				double [][] theta = LDAUtils.drawDirichlets(docTopicCounts);
-				LDAUtils.writeBinaryDoubleMatrix(theta, iteration, binOutput.getAbsolutePath() + "/Theta_DxK");				
+				double [][] theta = LDAUtils.drawDirichlets(docTopicCounts, alpha);
+				// LDAUtils.writeBinaryDoubleMatrix(theta, iteration, binOutput.getAbsolutePath() + "/Theta_DxK");	
+				// --- plda: added on July 10, 2021 --- 	
+				String fn = String.format(asciiOutput.getAbsolutePath() + "/Theta_DxK" + "_" + theta.length + "_" + theta[0].length + "_%05d.csv", iteration);	
+				LDAUtils.writeASCIIDoubleMatrix(theta, fn, ",");	
+				// ----------- plda --------------
 			}
 			if( printFirstNTopWords.length > 1 && LDAUtils.inRangeInterval(iteration, printFirstNTopWords)) {
 				// Assign these once
@@ -139,7 +170,27 @@ public class SerialCollapsedLDA extends SimpleLDA implements LDAGibbsSampler {
 				LDAUtils.writeBinaryDoubleMatrixIndices(LDAUtils.transpose(phi), iteration, 
 						binOutput.getAbsolutePath() + "/Phi_KxV", topIndices);
 			}
+
+			if (zSamplingTime >= maxExecTimeMillis){
+				break; 
+			}
 		}
+
+		System.out.println(
+			"\nCGS: z sampling time (milliseconds) = " + 
+			zSamplingTime + 
+			" (iteration: " + 
+			currentIteration + 
+			") \n"
+			);
+		// System.out.println(
+		// 	"\nCGS: z sampling time (nanoseconds) = " + 
+		// 	zSamplingNano + 
+		// 	" (iteration: " + 
+		// 	currentIteration + 
+		// 	") \n"
+		// 	);
+
 	}
 
 	/**

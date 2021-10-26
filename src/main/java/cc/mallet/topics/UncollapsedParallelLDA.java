@@ -62,7 +62,16 @@ public class UncollapsedParallelLDA extends ModifiedSimpleLDA implements LDAGibb
 	protected int phiBurnIn = 0;
 	protected int phiMeanThin = 0;
 	protected int noSampledPhi= 0;
+
+	// This matrix keeps the document theta samples
+	protected double[][] thetaMatrix; // a D x K matrix
+	protected int numDocuments;
+	protected String whichModel;
 	
+	// protected int thetaBurnIn = 0;
+	// protected int thetaThin = 0;
+	// protected boolean saveTheta = false;
+
 	DocumentBatchBuilder bb;
 	TopicBatchBuilder tbb;
 
@@ -111,6 +120,8 @@ public class UncollapsedParallelLDA extends ModifiedSimpleLDA implements LDAGibb
 	public UncollapsedParallelLDA(LDAConfiguration config) {
 		super(config);
 
+		this.whichModel = config.getScheme(); // to check which algorithm is running 
+
 		documentSamplerPool = new ForkJoinPool(Runtime.getRuntime().availableProcessors());
 		
 		// With job stealing we can only have one global z / counts timing
@@ -153,10 +164,17 @@ public class UncollapsedParallelLDA extends ModifiedSimpleLDA implements LDAGibb
 		}
 		
 		usingSymmetricAlpha = config.useSymmetricAlpha(LDAConfiguration.SYMMETRIC_ALPHA_DEFAULT);
+
+		// plda: Reads configuration file to save Phi matrix (distributions of topics)
 		savePhiMeans = config.savePhiMeans(LDAConfiguration.SAVE_PHI_MEAN_DEFAULT);
 		phiBurnIn    = (int)(((double) config.getPhiBurnInPercent(LDAConfiguration.PHI_BURN_IN_DEFAULT) / 100)
 						             * config.getNoIterations(LDAConfiguration.NO_ITER_DEFAULT)); 
 		phiMeanThin  = config.getPhiMeanThin(LDAConfiguration.PHI_THIN_DEFAULT);
+
+		// saveTheta = config.saveTheta(LDAConfiguration.SAVE_THETA_DEFAULT);
+		// thetaBurnIn = config.getThetaBurnIn(LDAConfiguration.THETA_BURN_IN_DEFAULT);
+		// thetaThin = config.getThetaThin(LDAConfiguration.THETA_THIN_DEFAULT);
+
 		hyperparameterOptimizationInterval = config.getHyperparamOptimInterval(LDAConfiguration.HYPERPARAM_OPTIM_INTERVAL_DEFAULT);
 	}
 	
@@ -509,16 +527,30 @@ public class UncollapsedParallelLDA extends ModifiedSimpleLDA implements LDAGibb
 		if(output_interval.length>1||printFirstNDocs.length>1||printFirstNTopWords.length>1) {
 			binOutput = LoggingUtils.checkCreateAndCreateDir(config.getLoggingUtil().getLogDir().getAbsolutePath() + "/binaries");
 		}
+		// --- plda: added on July 10, 2021 --- 
+		File asciiOutput = null;
+		if (output_interval.length > 1 || printFirstNDocs.length > 1 || printFirstNTopWords.length > 1) {
+			asciiOutput = LoggingUtils.checkCreateAndCreateDir(config.getLoggingUtil().getLogDir().getAbsolutePath() + "/ascii");
+		}
+
+		long maxExecTimeMillis = TimeUnit.MILLISECONDS.convert(config.getMaxExecTimeSeconds(LDAConfiguration.EXEC_TIME_DEFAULT), TimeUnit.SECONDS); 
+		// ----------- plda --------------
 		boolean printPhi = config.getPrintPhi();
 		int startDiagnostic = config.getStartDiagnostic(LDAConfiguration.START_DIAG_DEFAULT);
 
 		String loggingPath = config.getLoggingUtil().getLogDir().getAbsolutePath();
 
-		double logLik = modelLogLikelihood();	
-		String tw = topWords (wordsPerTopic);
-		LogState logState = new LogState(logLik, 0, tw, loggingPath, logger);
-		loglikelihood.add(logLik);
-		LDAUtils.logLikelihoodToFile(logState);
+		boolean computeLikelihood = config.computeLikelihood();
+		double logLik; 
+		String tw; 
+		LogState logState;
+		if (computeLikelihood) {
+			logLik = modelLogLikelihood();
+			tw = topWords(wordsPerTopic);
+			logState = new LogState(logLik, 0, tw, loggingPath, logger);
+			loglikelihood.add(logLik);
+			LDAUtils.logLikelihoodToFile(logState);
+		}
 
 		boolean logTypeTopicDensity = config.logTypeTopicDensity(LDAConfiguration.LOG_TYPE_TOPIC_DENSITY_DEFAULT);
 		boolean logDocumentDensity = config.logDocumentDensity(LDAConfiguration.LOG_DOCUMENT_DENSITY_DEFAULT);
@@ -567,6 +599,8 @@ public class UncollapsedParallelLDA extends ModifiedSimpleLDA implements LDAGibb
 			System.out.println("Logged topic indicators for iteration: " + getCurrentIteration());
 		}
 
+		long zSamplingTimeCum = 0;
+		long phiSamplingTimeCum = 0; 
 		for (int iteration = 1; iteration <= iterations && !abort; iteration++) {
 			currentIteration = iteration;
 			if(hyperparameterOptimizationInterval > 1  && iteration % hyperparameterOptimizationInterval == 0) {
@@ -595,6 +629,7 @@ public class UncollapsedParallelLDA extends ModifiedSimpleLDA implements LDAGibb
 			long zSamplingTokenUpdateTime = endTypeTopicUpdate - iterationStart;
 			logger.finer("Time for updating type-topic counts: " + 
 					(endTypeTopicUpdate - beforeSync) + "ms\t");
+			zSamplingTimeCum += zSamplingTokenUpdateTime; 
 			
 			// In the HDP the numTopics can change after the Z sampling 
 			if(testSet != null) {
@@ -614,6 +649,7 @@ public class UncollapsedParallelLDA extends ModifiedSimpleLDA implements LDAGibb
 			long phiSamplingTime = elapsedMillis - endTypeTopicUpdate;
 
 			logger.finer("Time for sampling phi: " + phiSamplingTime + "ms\t");
+			phiSamplingTimeCum += phiSamplingTime; 
 
 			if (startDiagnostic > 0 && iteration >= startDiagnostic && printPhi) {
 				LDAUtils.writeBinaryDoubleMatrix(phi, iteration, numTopics, numTypes, loggingPath + "/phi");	
@@ -628,7 +664,7 @@ public class UncollapsedParallelLDA extends ModifiedSimpleLDA implements LDAGibb
 			logger.finer("--------------------");
 
 			// Occasionally print more information
-			if (showTopicsInterval > 0 && iteration % showTopicsInterval == 0) {
+			if (showTopicsInterval > 0 && (iteration % showTopicsInterval == 0) && computeLikelihood) {
 				
 				if(testSet != null) {
 					heldOutLL = evaluator.evaluateLeftToRight(testSet, numParticles, null);					
@@ -667,12 +703,31 @@ public class UncollapsedParallelLDA extends ModifiedSimpleLDA implements LDAGibb
 					LDAUtils.writeIntRowArray(tokensPerTopic, loggingPath +  "/tokens_per_topic.csv");
 				}
 			}
-
+			// --- plda: added on July 10, 2021 --- 
 			if( printFirstNDocs.length > 1 && LDAUtils.inRangeInterval(iteration, printFirstNDocs)) {
-				int [][] docTopicCounts = LDAUtils.getDocumentTopicCounts(data, numTopics, nDocs);
-				double [][] theta = LDAUtils.drawDirichlets(docTopicCounts);
-				LDAUtils.writeBinaryDoubleMatrix(theta, iteration, binOutput.getAbsolutePath() + "/Theta_DxK");				
+				double[][] docTheta; // a nDocs x K matrix
+				if (!this.whichModel.equals("ggs")){
+					int [][] docTopicCounts = LDAUtils.getDocumentTopicCounts(data, numTopics, nDocs);
+					docTheta = LDAUtils.drawDirichlets(docTopicCounts, alpha);
+				}
+				else {
+					docTheta = new double[nDocs][numTopics];
+					for (int didx = 0; didx < nDocs; didx++) {
+						docTheta[didx] = this.thetaMatrix[didx];
+					}
+				}
+				// When GGS, we do not sampe theta matrix again 
+				// LDAUtils.writeBinaryDoubleMatrix(docTheta, iteration, binOutput.getAbsolutePath() + "/Theta_DxK");	
+
+				String fn = String.format(
+					asciiOutput.getAbsolutePath() + "/Theta_DxK" 
+					+ "_" + docTheta.length 
+					+ "_" + docTheta[0].length 
+					+ "_%05d.csv", iteration);	
+				LDAUtils.writeASCIIDoubleMatrix(docTheta, fn, ",");	
 			}
+			// ----------- plda --------------
+
 			if( printFirstNTopWords.length > 1 && LDAUtils.inRangeInterval(iteration, printFirstNTopWords)) {
 				// Assign these once
 				if(topIndices==null) {
@@ -704,7 +759,21 @@ public class UncollapsedParallelLDA extends ModifiedSimpleLDA implements LDAGibb
 
 			//long iterEnd = System.currentTimeMillis();
 			//System.out.println("Iteration "+ currentIteration + " took: " + (iterEnd-iterStart) + " milliseconds...");
+
+			if ((zSamplingTimeCum + phiSamplingTimeCum) >= maxExecTimeMillis){
+				break; 
+			}
+				 
 		}
+		System.out.println("\nDocument sampling time (millseconds) = " + zSamplingTimeCum);
+		System.out.println("\nTopic sampling time (millseconds) = " + phiSamplingTimeCum);
+		System.out.println(
+			"\nTotal sampling time (millseconds) = " + 
+			(zSamplingTimeCum + phiSamplingTimeCum) + 
+			" (iteration: " + 
+			currentIteration + 
+			") \n"
+			);
 
 		postSample();
 

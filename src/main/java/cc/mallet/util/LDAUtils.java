@@ -1633,6 +1633,49 @@ public class LDAUtils {
 		return dirDraws;
 	}
 
+	/**
+	 * Draws Dirichlet samples based on document topic counts 
+	 * 
+	 * Added on: July 11, 2021 (plda)
+	 * 
+	 * @param countMatrix square matrix of integers
+	 * @param alpha a vector of Dirichlet prior hyperparameters 
+	 * @return square matrix with dirichlet draw 
+	 */
+	public static double [][] drawDirichlets(int[][] countMatrix, double[] alpha) {
+		double [][] dirDraws = new double[countMatrix.length][countMatrix[0].length];
+		for (int i = 0; i < countMatrix.length; i++) {
+			double [] ps = new double[countMatrix[i].length];
+			for (int j = 0; j < countMatrix[i].length; j++) {
+				ps[j] = countMatrix[i][j] + alpha[j];
+			}
+			Dirichlet dir = new Dirichlet(ps);
+			dirDraws[i] = dir.nextDistribution();
+		}
+		return dirDraws;
+	}
+	/**
+	 * Draws Dirichlet samples based on document topic counts 
+	 * 
+	 * Added on: July 11, 2021 (plda)
+	 * 
+	 * @param countMatrix square matrix of integers
+	 * @param alpha a scalar Dirichlet prior hyperparameter
+	 * @return square matrix with dirichlet draw 
+	 */
+	public static double [][] drawDirichlets(int[][] countMatrix, double alpha) {
+		double [][] dirDraws = new double[countMatrix.length][countMatrix[0].length];
+		for (int i = 0; i < countMatrix.length; i++) {
+			double [] ps = new double[countMatrix[i].length];
+			for (int j = 0; j < countMatrix[i].length; j++) {
+				ps[j] = countMatrix[i][j] + alpha;
+			}
+			Dirichlet dir = new Dirichlet(ps);
+			dirDraws[i] = dir.nextDistribution();
+		}
+		return dirDraws;
+	}
+
 	public static int[][] extractCounts(int[][] topicWordCnts,int[][] topIndices) {
 		int [][] extractedCounts = new int [topIndices.length][topIndices[0].length];
 		for (int i = 0; i < topIndices.length; i++) {

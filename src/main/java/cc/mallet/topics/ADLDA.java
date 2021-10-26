@@ -9,12 +9,13 @@ import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.logging.Level;
 import java.util.logging.Logger;
+import java.util.concurrent.TimeUnit;
 
 import org.apache.commons.lang.NotImplementedException;
 
 import cc.mallet.configuration.LDAConfiguration;
-import cc.mallet.topics.ParallelTopicModel;
-import cc.mallet.topics.TopicAssignment;
+// import cc.mallet.topics.ParallelTopicModel;
+// import cc.mallet.topics.TopicAssignment;
 import cc.mallet.types.FeatureSequence;
 import cc.mallet.types.IDSorter;
 import cc.mallet.types.InstanceList;
@@ -24,6 +25,8 @@ import cc.mallet.util.MalletLogger;
 import cc.mallet.util.Randoms;
 import cc.mallet.util.Stats;
 import cc.mallet.util.Timing;
+import cc.mallet.util.LoggingUtils;
+
 
 public class ADLDA extends ParallelTopicModel implements LDAGibbsSampler {
 
@@ -71,10 +74,16 @@ public class ADLDA extends ParallelTopicModel implements LDAGibbsSampler {
 	public void estimate () throws IOException {
 		if(config==null) throw new IllegalStateException("You must set the configuration before calling 'estimate'");
 		String loggingPath = config.getLoggingUtil().getLogDir().getAbsolutePath();
-		double logLik = modelLogLikelihood();
-		String tw = topWords (wordsPerTopic);
-		LogState logState = new LogState(logLik, 0, tw, loggingPath, logger);
-		LDAUtils.logLikelihoodToFile(logState);
+		boolean computeLikelihood = config.computeLikelihood();
+		double logLik; 
+		String tw; 
+		LogState logState;
+		if (computeLikelihood) {
+			logLik = modelLogLikelihood();
+			tw = topWords(wordsPerTopic);
+			logState = new LogState(logLik, 0, tw, loggingPath, logger);
+			LDAUtils.logLikelihoodToFile(logState);
+		}
 		
 		boolean logTypeTopicDensity = config.logTypeTopicDensity(LDAConfiguration.LOG_TYPE_TOPIC_DENSITY_DEFAULT);
 		boolean logDocumentDensity = config.logDocumentDensity(LDAConfiguration.LOG_DOCUMENT_DENSITY_DEFAULT);
@@ -91,6 +100,25 @@ public class ADLDA extends ParallelTopicModel implements LDAGibbsSampler {
 			LDAUtils.logStatstHeaderToFile(stats);
 			LDAUtils.logStatsToFile(stats);
 		}
+
+		// --- plda: added on July 10, 2021 --- 
+		int [] printFirstNDocs = config.getPrintNDocsInterval();
+		int nDocs = config.getPrintNDocs();
+		int [] printFirstNTopWords = config.getPrintNTopWordsInterval();
+		// int nWords = config.getPrintNTopWords();
+
+		int [] defaultVal = {-1};
+		int [] output_interval = config.getIntArrayProperty("diagnostic_interval",defaultVal);
+
+		File asciiOutput = null;
+		if (output_interval.length > 1 || printFirstNDocs.length > 1 || printFirstNTopWords.length > 1) {
+			asciiOutput = LoggingUtils.checkCreateAndCreateDir(config.getLoggingUtil().getLogDir().getAbsolutePath() + "/ascii");
+		}
+
+		long maxExecTimeMillis = TimeUnit.MILLISECONDS.convert(config.getMaxExecTimeSeconds(LDAConfiguration.EXEC_TIME_DEFAULT), TimeUnit.SECONDS); 
+
+		// ----------- plda --------------
+
 
 		setNumThreads(numThreads);
 		long startTime = System.currentTimeMillis();
@@ -168,6 +196,7 @@ public class ADLDA extends ParallelTopicModel implements LDAGibbsSampler {
 
 		ExecutorService executor = Executors.newFixedThreadPool(numThreads);
 
+		long execTimeCumMillis = 0; 
 		for (int iteration = 1; iteration <= numIterations && !abort ; iteration++) {
 			currentIteration = iteration;
 
@@ -269,13 +298,14 @@ public class ADLDA extends ParallelTopicModel implements LDAGibbsSampler {
 			}
 
 			long elapsedMillis = System.currentTimeMillis() - iterationStart;
-			if (showTopicsInterval > 0 && iteration % showTopicsInterval == 0) {
+			execTimeCumMillis += elapsedMillis; 
+			if (showTopicsInterval > 0 && (iteration % showTopicsInterval == 0) && computeLikelihood)  {
 				logLik = modelLogLikelihood();
 				String wt = displayTopWords (wordsPerTopic, false);
 				logState = new LogState(logLik, iteration, wt, loggingPath, logger);
 				LDAUtils.logLikelihoodToFile(logState);
 				logger.info("<" + iteration + "> Log Likelihood: " + logLik);
-				logger.fine(tw);
+				logger.fine(wt);
 				
 				if(logTypeTopicDensity || logDocumentDensity) {
 					density = logTypeTopicDensity ? LDAUtils.calculateMatrixDensity(typeTopicCounts) : -1;
@@ -312,17 +342,30 @@ public class ADLDA extends ParallelTopicModel implements LDAGibbsSampler {
 //					logger.info ("<" + iteration + ">");
 //				}
 //			}
-			
+
+			// --- plda: added on July 10, 2021 --- 
+			if( printFirstNDocs.length > 1 && LDAUtils.inRangeInterval(iteration, printFirstNDocs)) {
+				int [][] docTopicCounts = LDAUtils.getDocumentTopicCounts(data, numTopics, nDocs);
+				double [][] theta = LDAUtils.drawDirichlets(docTopicCounts, alpha);
+				String fn = String.format(asciiOutput.getAbsolutePath() + "/Theta_DxK" + "_" + theta.length + "_" + theta[0].length + "_%05d.csv", iteration);	
+				LDAUtils.writeASCIIDoubleMatrix(theta, fn, ",");					
+			}
+			// ----------- plda --------------
+
 			// Reset densities
 			for (int i = 0; i < runnables.length; i++) {
 				runnables[i].setKdDensity(0);
 			}
 
+			if (execTimeCumMillis >= maxExecTimeMillis){
+				break; 
+			}
 		}
 
 		executor.shutdownNow();
 
-		long seconds = Math.round((System.currentTimeMillis() - startTime)/1000.0);
+		long execTimeMillis = System.currentTimeMillis() - startTime; 
+		long seconds = Math.round(execTimeMillis / 1000.0);
 		long minutes = seconds / 60;	seconds %= 60;
 		long hours = minutes / 60;	minutes %= 60;
 		long days = hours / 24;	hours %= 24;
@@ -335,6 +378,22 @@ public class ADLDA extends ParallelTopicModel implements LDAGibbsSampler {
 		timeReport.append(seconds); timeReport.append(" seconds");
 
 		logger.info(timeReport.toString());
+		// logger.info("\nExecution time (milliseconds): " + Long.toString(execTimeMillis));
+		System.out.println("\nExecution time (milliseconds): " + Long.toString(execTimeMillis));
+		// logger.info(
+		// 	"\nExecution time (milliseconds; sampling): " + 
+		// 	Long.toString(execTimeCumMillis) + 
+		// 	" (iteration: " + 
+		// 	currentIteration + 
+		// 	") \n");
+		
+		System.out.println(
+			"\nExecution time (milliseconds; sampling): " + 
+			Long.toString(execTimeCumMillis) + 
+			" (iteration: " + 
+			currentIteration + 
+			") \n");
+
 	}
 
 	/**

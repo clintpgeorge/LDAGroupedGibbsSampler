@@ -1062,5 +1062,29 @@ public class TopicMassExperiment {
 			return pc.logTopicIndicators(b);
 		}
 
+		@Override
+		public boolean computeLikelihood(){
+			return pc.computeLikelihood();
+		}
+
+		// @Override
+		// public boolean saveTheta(boolean detaultValue) {
+		// 	return pc.saveTheta(detaultValue);
+		// }
+
+		// @Override
+		// public int getThetaThin(int thetaThinDefault) {
+		// 	return pc.getThetaThin(thetaThinDefault); 
+		// }
+
+		// @Override
+		// public int getThetaBurnIn(int thetaBurnInDefault) {
+		// 	return pc.getThetaBurnIn(thetaBurnInDefault); 
+		// }
+
+		@Override
+		public int getMaxExecTimeSeconds(int maxExecTime){
+			return getInteger("exec_time", maxExecTime);
+		}
 	}
 }

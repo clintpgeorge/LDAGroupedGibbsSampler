@@ -21,8 +21,6 @@ public class LDAGroupedGibbsSampler extends UncollapsedParallelLDA implements LD
 	private static final long serialVersionUID = 20190529L;
 	ParallelDirichlet docDirichletSampler;
 	ParallelDirichlet topicDirichletSampler;
-	protected double[][] thetaMatrix; // a D x K matrix
-	protected int numDocuments;
 
 	public LDAGroupedGibbsSampler(LDAConfiguration config) {
 		super(config);

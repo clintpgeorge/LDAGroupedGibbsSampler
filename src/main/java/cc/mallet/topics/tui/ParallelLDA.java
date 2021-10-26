@@ -22,7 +22,7 @@ import cc.mallet.topics.EfficientUncollapsedParallelLDA;
 import cc.mallet.topics.HDPSamplerWithPhi;
 import cc.mallet.topics.LDAGibbsSampler;
 import cc.mallet.topics.LDAGroupedGibbsSampler;
-import cc.mallet.topics.LDAGroupedGibbsSamplerTest;
+// import cc.mallet.topics.LDAGroupedGibbsSamplerTest;
 import cc.mallet.topics.LDASamplerWithCallback;
 import cc.mallet.topics.LDASamplerWithPhi;
 import cc.mallet.topics.LightPCLDA;
@@ -64,9 +64,9 @@ public class ParallelLDA implements IterationListener {
 	public void doSample(String[] args) throws Exception {
 		if(args.length == 0) {
 			System.out.println("\n" + PROGRAM_NAME + ": No args given, you should typically call it along the lines of: \n" 
-					+ "java -cp PCPLDA-X.X.X.jar cc.mallet.topics.tui.ParallelLDA --run_cfg=src/main/resources/configuration/PLDAConfig.cfg\n" 
+					+ "java -cp pLDA-X.X.X.jar cc.mallet.topics.tui.ParallelLDA --run_cfg=src/main/resources/configuration/PLDAConfig.cfg\n" 
 					+ "or\n" 
-					+ "java -jar PCPLDA-X.X.X.jar -run_cfg=src/main/resources/configuration/PLDAConfig.cfg\n");
+					+ "java -jar pLDA-X.X.X.jar -run_cfg=src/main/resources/configuration/PLDAConfig.cfg\n");
 			System.exit(-1);
 		}
 		
@@ -106,12 +106,12 @@ public class ParallelLDA implements IterationListener {
 		
 		System.out.println("We have: " + Runtime.getRuntime().availableProcessors() 
 				+ " processors avaiable");
-		String buildVer = LoggingUtils.getManifestInfo("Implementation-Build","PCPLDA");
-		String implVer  = LoggingUtils.getManifestInfo("Implementation-Version", "PCPLDA");
+		String buildVer = LoggingUtils.getManifestInfo("Implementation-Build", "pLDA");
+		String implVer  = LoggingUtils.getManifestInfo("Implementation-Version", "pLDA");
 		if(buildVer==null||implVer==null) {
 			System.out.println("GIT info:" + LoggingUtils.getLatestCommit());
 		} else {
-			System.out.println("Build info:" 
+			System.out.println("Build info: " 
 					+ "Implementation-Build = " + buildVer + ", " 
 					+ "Implementation-Version = " + implVer);
 		}
@@ -122,7 +122,7 @@ public class ParallelLDA implements IterationListener {
 		ParsedLDAConfiguration tmpconfig = (ParsedLDAConfiguration) ConfigFactory.getMainConfiguration(cp);			
 		
 		int numberOfRuns = tmpconfig.getInt("no_runs");
-		System.out.println("Doing: " + numberOfRuns + " runs");
+		System.out.println("Doing: " + numberOfRuns + " runs\n");
 		// Reading in command line parameters		
 		for (int i = 0; i < numberOfRuns; i++) {
 			System.out.println("Starting run: " + i);
@@ -133,7 +133,8 @@ public class ParallelLDA implements IterationListener {
 			if(!expDir.equals("")) {
 				expDir += "/";
 			}
-			String logSuitePath = "Runs/" + expDir + "RunSuite" + LoggingUtils.getDateStamp();
+			// String logSuitePath = "Runs/" + expDir + "RunSuite" + LoggingUtils.getDateStamp();
+			String logSuitePath = expDir + "RunSuite" + LoggingUtils.getDateStamp();
 			System.out.println("Logging to: " + logSuitePath);
 			lu.checkAndCreateCurrentLogDir(logSuitePath);
 			config.setLoggingUtil(lu);
@@ -207,16 +208,16 @@ public class ParallelLDA implements IterationListener {
 				System.out.println("_____________________________\n");
 
 				// Runs the model
-				System.out.println("Starting:" + new Date() + "\n");
+				System.out.println("Starting: " + new Date() + "\n");
 				long startTime = System.nanoTime();
 				Timer t = new Timer();
 				t.start();
 				model.sample(config.getNoIterations(LDAConfiguration.NO_ITER_DEFAULT));
 				t.stop();
-				System.out.println("\nFinished:" + new Date() + "\n");
+				System.out.println("\nFinished: " + new Date() + "\n");
 				long endTime = System.nanoTime();
-				long totalTime = TimeUnit.NANOSECONDS.toSeconds(endTime - startTime);
-				System.out.println("Execution time: " + totalTime + " seconds \n");
+				long totalTime = TimeUnit.NANOSECONDS.toMillis(endTime - startTime);
+				System.out.println("Execution time: " + totalTime + " milli seconds \n");
 				
 				int requestedWords = config.getNrTopWords(LDAConfiguration.NO_TOP_WORDS_DEFAULT);
 				//System.out.println("Topic model diagnostics:");
@@ -249,7 +250,7 @@ public class ParallelLDA implements IterationListener {
 						String docTopicMeanFn = config.getPhiMeansOutputFilename();
 						double [][] means = modelWithPhi.getPhiMeans();
 						if(means!=null) {
-						LDAUtils.writeASCIIDoubleMatrix(means, lgDir.getAbsolutePath() + "/" + docTopicMeanFn, ",");
+							LDAUtils.writeASCIIDoubleMatrix(means, lgDir.getAbsolutePath() + "/" + docTopicMeanFn, ",");
 						} else {
 							System.err.println("WARNING: ParallelLDA: No Phi means where sampled, not saving Phi means! This is likely due to a combination of configuration settings of phi_mean_burnin, phi_mean_thin and save_phi_mean");
 						}
@@ -290,8 +291,8 @@ public class ParallelLDA implements IterationListener {
 				metadata.add("No. Topics: " + model.getNoTopics());
 				metadata.add("Start Seed: " + model.getStartSeed());
 				// Save stats for this run
-				lu.dynamicLogRun("Runs", t, cp, (Configuration) config, null, 
-						ParallelLDA.class.getName(), "Convergence", "HEADING", "PLDA", 1, metadata);
+				lu.dynamicLogRun(expDir, t, cp, (Configuration) config, null, ParallelLDA.class.getName(),
+						"Convergence", "HEADING", "PLDA", 1, metadata);
 				
 				if(requestedWords>instances.getDataAlphabet().size()) {
 					requestedWords = instances.getDataAlphabet().size();
@@ -319,12 +320,12 @@ public class ParallelLDA implements IterationListener {
 				out.flush();
 				out.close();
 
-				System.out.println("Top words are: \n" + 
-						LDAUtils.formatTopWords(LDAUtils.getTopWords(requestedWords, 
-								model.getAlphabet().size(), 
-								model.getNoTopics(), 
-								model.getTypeTopicMatrix(), 
-								model.getAlphabet())));
+				// System.out.println("Top words are: \n" + 
+				// 		LDAUtils.formatTopWords(LDAUtils.getTopWords(requestedWords, 
+				// 				model.getAlphabet().size(), 
+				// 				model.getNoTopics(), 
+				// 				model.getTypeTopicMatrix(), 
+				// 				model.getAlphabet())));
 				// System.out.println("Relevance words are: \n" + 
 				// 		LDAUtils.formatTopWords(LDAUtils.getTopRelevanceWords(requestedWords, 
 				// 				model.getAlphabet().size(), 
@@ -352,15 +353,16 @@ public class ParallelLDA implements IterationListener {
 					printHDPResults(model, lgDir);
 				}
 				
-				System.out.println(new Date() + ": I am done!");
+				System.out.println(new Date() + ": I am done!\n");
+				logOut.close(); // closes the output stream 
 			}
-			if(buildVer==null||implVer==null) {
-				System.out.println("GIT info:" + LoggingUtils.getLatestCommit());
-			} else {
-			System.out.println("Build info:" 
-					+ "Implementation-Build = " + buildVer + ", " 
-					+ "Implementation-Version = " + implVer);
-			}
+			// if(buildVer==null||implVer==null) {
+			// 	System.out.println("GIT info:" + LoggingUtils.getLatestCommit());
+			// } else {
+			// System.out.println("Build info: " 
+			// 		+ "Implementation-Build = " + buildVer + ", " 
+			// 		+ "Implementation-Version = " + implVer);
+			// }
 			normalShutdown = true;
 		}
 	}
@@ -468,27 +470,27 @@ public class ParallelLDA implements IterationListener {
 		switch(whichModel) {			
 		case "ggs": {
 			model = new LDAGroupedGibbsSampler(config);
-			System.out.println("LDA Grouped Gibbs Sampler.");
+			System.out.println("LDA Grouped Gibbs Sampler. GGS by George and Doss (2018).");
 			break;
 		}
-		case "ggs2": {
-			model = new LDAGroupedGibbsSamplerTest(config);
-			System.out.println("LDA Grouped Gibbs Sampler with Sparse Topic Dirichlet Sampling (valid?).");
-			break;
-		}
+		// case "ggs2": { // deprecated as of 2021-01-12
+		// 	model = new LDAGroupedGibbsSamplerTest(config);
+		// 	System.out.println("LDA Grouped Gibbs Sampler with Sparse Topic Dirichlet Sampling (valid?).");
+		// 	break;
+		// }
 		case "adlda": {
 			model = new ADLDA(config);
-			System.out.println("ADLDA.");
+			System.out.println("Approximate Distributed LDA. ADLDA by Newman et al. (2009).");
 			break;
 		}
 		case "uncollapsed": {
 			model = new UncollapsedParallelLDA(config);
-			System.out.println("Uncollapsed Parallell LDA.");
+			System.out.println("Uncollapsed Parallell LDA. PCGS by Magnusson et al. (2018).");
 			break;
 		}
 		case "collapsed": {
 			model = new SerialCollapsedLDA(config);
-			System.out.println("Collapsed Serial LDA.");
+			System.out.println("Collapsed Serial LDA. CGS of Griffiths and Steyvers (2004).");
 			break;
 		}
 		case "lightcollapsed": {

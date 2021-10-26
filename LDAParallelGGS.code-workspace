@@ -12,7 +12,9 @@
 			"**/.settings": true,
 			"**/.factorypath": true
 		},
-		"maven.view": "flat",
-		"maven.executable.preferMavenWrapper": false
+		"maven.view": "hierarchical",
+		"maven.executable.preferMavenWrapper": false,
+		"java.dependency.syncWithFolderExplorer": true,
+		"java.dependency.packagePresentation": "hierarchical"
 	}
 }

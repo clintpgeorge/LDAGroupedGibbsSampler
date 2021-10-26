@@ -74,6 +74,10 @@ public class SimpleLDAConfiguration implements LDAConfiguration {
 	private int documentSamplerSplitLimit = LDAConfiguration.DOCUMENT_SAMPLER_SPLIT_LIMIT_DEFAULT;
 	private double hdpKPercentile = LDAConfiguration.HDP_K_PERCENTILE;
 	private boolean logTopicIndicators;
+	// private int thetaBurnIn = LDAConfiguration.THETA_BURN_IN_DEFAULT;
+	// private int thetaThin = LDAConfiguration.THETA_THIN_DEFAULT; 
+	// private boolean saveTheta = LDAConfiguration.SAVE_THETA_DEFAULT;
+
 	
 	public SimpleLDAConfiguration(LoggingUtils logUtil, String scheme,
 			Integer noTopics, Double alpha, Double beta, Integer noIters,
@@ -774,5 +778,38 @@ public class SimpleLDAConfiguration implements LDAConfiguration {
 	public void setLogTopicIndicators(boolean b) {
 		logTopicIndicators = b;
 	}
+
+	@Override
+	public boolean computeLikelihood(){
+		return LDAConfiguration.COMPUTE_LIKELIHOOD;
+	}
+
+	// --- plda: added on July 10, 2021 --- 
+
+	// @Override
+	// public boolean saveTheta(boolean detaultValue){
+	// 	this.saveTheta = detaultValue; 
+	// 	return this.saveTheta;
+	// }
+
+	// @Override
+	// public int getThetaThin(int thetaThinDefault){
+	// 	this.thetaThin = thetaThinDefault; 
+	// 	return this.thetaThin; 
+	// }
+
+	// @Override
+	// public int getThetaBurnIn(int thetaBurnInDefault){
+	// 	this.thetaBurnIn = thetaBurnInDefault; 
+	// 	return this.thetaBurnIn; 
+	// }
+
+	@Override
+	public int getMaxExecTimeSeconds(int maxExecTime){
+		return LDAConfiguration.EXEC_TIME_DEFAULT;
+	}
+	
+	// ----------- plda --------------
+
 
 }
