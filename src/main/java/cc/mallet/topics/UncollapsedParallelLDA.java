@@ -523,20 +523,23 @@ public class UncollapsedParallelLDA extends ModifiedSimpleLDA implements LDAGibb
 
 		int [] defaultVal = {-1};
 		int [] output_interval = config.getIntArrayProperty("diagnostic_interval",defaultVal);
+
+		boolean printPhi = config.getPrintPhi();
+		int startDiagnostic = config.getStartDiagnostic(LDAConfiguration.START_DIAG_DEFAULT);
+		
 		File binOutput = null;
 		if(output_interval.length>1||printFirstNDocs.length>1||printFirstNTopWords.length>1) {
 			binOutput = LoggingUtils.checkCreateAndCreateDir(config.getLoggingUtil().getLogDir().getAbsolutePath() + "/binaries");
 		}
 		// --- plda: added on July 10, 2021 --- 
 		File asciiOutput = null;
-		if (output_interval.length > 1 || printFirstNDocs.length > 1 || printFirstNTopWords.length > 1) {
+		if (output_interval.length > 1 || printFirstNDocs.length > 1 || printFirstNTopWords.length > 1 || printPhi || startDiagnostic > 1) {
 			asciiOutput = LoggingUtils.checkCreateAndCreateDir(config.getLoggingUtil().getLogDir().getAbsolutePath() + "/ascii");
 		}
 
 		long maxExecTimeMillis = TimeUnit.MILLISECONDS.convert(config.getMaxExecTimeSeconds(LDAConfiguration.EXEC_TIME_DEFAULT), TimeUnit.SECONDS); 
 		// ----------- plda --------------
-		boolean printPhi = config.getPrintPhi();
-		int startDiagnostic = config.getStartDiagnostic(LDAConfiguration.START_DIAG_DEFAULT);
+
 
 		String loggingPath = config.getLoggingUtil().getLogDir().getAbsolutePath();
 
@@ -652,7 +655,18 @@ public class UncollapsedParallelLDA extends ModifiedSimpleLDA implements LDAGibb
 			phiSamplingTimeCum += phiSamplingTime; 
 
 			if (startDiagnostic > 0 && iteration >= startDiagnostic && printPhi) {
-				LDAUtils.writeBinaryDoubleMatrix(phi, iteration, numTopics, numTypes, loggingPath + "/phi");	
+				// LDAUtils.writeBinaryDoubleMatrix(
+				// 	phi, 
+				// 	iteration, 
+				// 	numTopics, 
+				// 	numTypes, 
+				// 	binOutput.getAbsolutePath() + "/phi");
+				String fn = String.format(
+					asciiOutput.getAbsolutePath() + "/Phi_KxV" 
+					+ "_" + phi.length 
+					+ "_" + phi[0].length 
+					+ "_%05d.csv", iteration);	
+				LDAUtils.writeASCIIDoubleMatrix(phi, fn, ",");	
 			}
 			if(output_interval.length == 2 && iteration >= output_interval[0] && iteration <= output_interval[1]) {
 				LDAUtils.writeBinaryDoubleMatrix(phi, iteration, numTopics, numTypes, binOutput.getAbsolutePath() + "/phi");
@@ -733,7 +747,7 @@ public class UncollapsedParallelLDA extends ModifiedSimpleLDA implements LDAGibb
 				if(topIndices==null) {
 					topIndices = LDAUtils.getTopWordIndices(nWords, numTypes, numTopics, typeTopicCounts, alphabet);
 				}
-				LDAUtils.writeBinaryDoubleMatrixIndices(phi, iteration, binOutput.getAbsolutePath() + "/Phi_KxV", topIndices);
+				LDAUtils.writeBinaryDoubleMatrixIndices(phi, iteration, binOutput.getAbsolutePath() + "/Selected_Phi_KxV", topIndices);
 			}
 			
 			if( hyperparameterOptimizationInterval > 1 && iteration % hyperparameterOptimizationInterval == 0) {
@@ -1068,7 +1082,8 @@ public class UncollapsedParallelLDA extends ModifiedSimpleLDA implements LDAGibb
 	}
 
 	/**
-	 * Spreads the sampling of phi matrix rows on different threads
+	 * Spreads the sampling of phi (topic) matrix rows on different threads. 
+	 * This depends on the configuration parameter 'topic_batches'
 	 * Creates Runnable() objects that call functions from the superclass
 	 * 
 	 * TODO: Should be cleaned up!
@@ -1130,7 +1145,9 @@ public class UncollapsedParallelLDA extends ModifiedSimpleLDA implements LDAGibb
 	}
 
 	/**
-	 * Samples new Phi's. If <code>topicTypeIndices</code> is NOT null it will sample phi conditionally
+	 * Samples new phi values.  
+	 * 
+	 * If <code>topicTypeIndices</code> is NOT null it will sample phi conditionally
 	 * on the indices in <code>topicTypeIndices</code>
 	 * 
 	 * @param indices indices of the topics that should be sampled, the other ones are skipped 
@@ -1138,12 +1155,15 @@ public class UncollapsedParallelLDA extends ModifiedSimpleLDA implements LDAGibb
 	 * @param phiMatrix
 	 */
 	public void loopOverTopics(int [] indices, int[][] topicTypeIndices, double[][] phiMatrix) {
-		long beforeSamplePhi = System.currentTimeMillis();		
+		long beforeSamplePhi = System.currentTimeMillis();
 		for (int topic : indices) {
 			int [] relevantTypeTopicCounts = topicTypeCountMapping[topic]; 
 			// Generates a standard array to feed to the Dirichlet constructor
 			// from the dictionary representation. 
-			if(topicTypeIndices==null) {
+			if (topicTypeIndices == null) {
+				// Clint's comment: The hyperparameter beta is not added to the topic counts 
+				// 'relevantTypeTopicCounts'. Hence, the MCMC chain is not guranteed to converge 
+				// to the correct posterior.
 				phiMatrix[topic] = dirichletSampler.nextDistribution(relevantTypeTopicCounts);
 			} else {
 				double[] dirichletParams = new double[numTypes];
