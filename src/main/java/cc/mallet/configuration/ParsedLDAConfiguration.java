@@ -152,6 +152,13 @@ public class ParsedLDAConfiguration extends SubConfig implements Configuration, 
 		return getBooleanProperty(key);
 	}
 
+	// Added on Jan 14, 2022 
+	@Override
+	public boolean getSavePhi() {
+		String key = "save_phi";
+		return getBooleanProperty(key);
+	}
+
 	@Override
 	public boolean getMeasureTiming() {
 		String key = "measure_timing";

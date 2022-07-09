@@ -1,7 +1,10 @@
 package cc.mallet.topics;
 
+import java.io.BufferedWriter;
 import java.io.File;
+import java.io.FileWriter;
 import java.io.IOException;
+import java.io.PrintWriter;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.concurrent.TimeUnit;
@@ -96,28 +99,33 @@ public class SerialCollapsedLDA extends SimpleLDA implements LDAGibbsSampler {
 			binOutput = LoggingUtils.checkCreateAndCreateDir(config.getLoggingUtil().getLogDir().getAbsolutePath() + "/binaries");
 		}
 		
+		boolean savePhi = config.getSavePhi();
+		int startDiagnostic = config.getStartDiagnostic(LDAConfiguration.START_DIAG_DEFAULT);
+
 		// --- plda: added on July 10, 2021 --- 
 		File asciiOutput = null;
-		if (output_interval.length > 1 || printFirstNDocs.length > 1 || printFirstNTopWords.length > 1) {
+		if (output_interval.length > 1 || printFirstNDocs.length > 1 || printFirstNTopWords.length > 1 || startDiagnostic >= 1) {
 			asciiOutput = LoggingUtils.checkCreateAndCreateDir(config.getLoggingUtil().getLogDir().getAbsolutePath() + "/ascii");
 		}
 
 		long maxExecTimeMillis = TimeUnit.MILLISECONDS.convert(config.getMaxExecTimeSeconds(LDAConfiguration.EXEC_TIME_DEFAULT), TimeUnit.SECONDS); 
-		// long maxExecTimeNano = TimeUnit.NANOSECONDS.convert(config.getMaxExecTimeMin(LDAConfiguration.EXEC_TIME_DEFAULT), TimeUnit.MINUTES); 
 		System.out.println("\nMax exec time (millseconds) = " + maxExecTimeMillis + "\n");
-		// System.out.println("\nMax exec time (nanoseconds) = " + maxExecTimeNano + "\n");
 
 		// ----------- plda --------------
 
+		System.out.println("\nDocument sampling hyperparameter alpha = " + alpha);
+		System.out.println("Topic sampling hyperparameter beta = " + beta + "\n");
+
+		System.out.println("Number of topics = " + numTopics);
+		System.out.println("Number of unique words = " + numTypes);
+
 
 		long zSamplingTime = 0; 
-		// long zSamplingNano = 0; 
 
 		for (int iteration = 1; iteration <= iterations && !abort; iteration++) {
 			currentIteration = iteration;
 
 			long iterationStart = System.currentTimeMillis();
-			// long startNano = System.nanoTime(); 
 
 			// Loop over every document in the corpus
 			for (int doc = 0; doc < data.size(); doc++) {
@@ -130,9 +138,7 @@ public class SerialCollapsedLDA extends SimpleLDA implements LDAGibbsSampler {
 			}
 
 			long elapsedMillis = System.currentTimeMillis();
-			// long elapsedNano = System.nanoTime();
 			zSamplingTime += (elapsedMillis - iterationStart); // accumulate the time 
-			// zSamplingNano += (elapsedNano - startNano); // accumulate the time 
 			logger.fine(iteration + "\t" + (elapsedMillis - iterationStart) + "ms\t");
 
 			if(config!= null) { 
@@ -148,28 +154,122 @@ public class SerialCollapsedLDA extends SimpleLDA implements LDAGibbsSampler {
 				if(config!= null) { 
 					logLik = modelLogLikelihood();
 					tw = topWords (wordsPerTopic);
-					// loggingPath = config.getLoggingUtil().getLogDir().getAbsolutePath();
 					LDAUtils.logLikelihoodToFile(logLik,iteration,tw,loggingPath,logger);
 				}
 			}
-			if( printFirstNDocs.length > 1 && LDAUtils.inRangeInterval(iteration, printFirstNDocs)) {
-				int [][] docTopicCounts = LDAUtils.getDocumentTopicCounts(data, numTopics, nDocs);
-				double [][] theta = LDAUtils.drawDirichlets(docTopicCounts, alpha);
-				// LDAUtils.writeBinaryDoubleMatrix(theta, iteration, binOutput.getAbsolutePath() + "/Theta_DxK");	
-				// --- plda: added on July 10, 2021 --- 	
-				String fn = String.format(asciiOutput.getAbsolutePath() + "/Theta_DxK" + "_" + theta.length + "_" + theta[0].length + "_%05d.csv", iteration);	
-				LDAUtils.writeASCIIDoubleMatrix(theta, fn, ",");	
-				// ----------- plda --------------
-			}
+
 			if( printFirstNTopWords.length > 1 && LDAUtils.inRangeInterval(iteration, printFirstNTopWords)) {
 				// Assign these once
 				if(topIndices==null) {
 					topIndices = LDAUtils.getTopWordIndices(nWords, numTypes, numTopics, typeTopicCounts, alphabet);
 				}
 				double [][] phi = LDAUtils.drawDirichlets(typeTopicCounts);
-				LDAUtils.writeBinaryDoubleMatrixIndices(LDAUtils.transpose(phi), iteration, 
-						binOutput.getAbsolutePath() + "/Phi_KxV", topIndices);
+				LDAUtils.writeBinaryDoubleMatrixIndices(LDAUtils.transpose(phi), iteration, binOutput.getAbsolutePath() + "/Selected_Phi_KxV", topIndices);
 			}
+
+			// Start changes on Jan 14, 2022 ---------
+			int numDocuments = data.size();
+			if (startDiagnostic > 0 && iteration >= startDiagnostic) {
+
+				// Augmented Gibbs sampling of \theta
+				int[][] docTopicCounts = LDAUtils.getDocumentTopicCounts(data, numTopics, numDocuments);
+				double[][] theta = LDAUtils.drawDirichlets(docTopicCounts, alpha);
+
+				// Compute Quantiy C_s
+				StringBuilder strMinDocsDist = new StringBuilder();
+				strMinDocsDist.append(iteration);
+				for (int d = 0; d < numDocuments; d++) {
+					double minDocsDist = 1e+20;
+					for (int dd = 0; dd < numDocuments; dd++) {
+						if (d != dd) {
+							// compute Euclidean distance between \theta_d, \theta_s
+							double docDist = 0.0;
+							for (int k = 0; k < numTopics; k++) {
+								docDist += Math.pow(theta[d][k] - theta[dd][k], 2.0);
+							}
+							docDist = Math.sqrt(docDist);
+							if (docDist < minDocsDist) {
+								minDocsDist = docDist;
+							}
+						}
+					}
+					strMinDocsDist.append(",");
+					strMinDocsDist.append(minDocsDist);
+				}
+
+				// TODO: Find an efficient way to save the distances
+				String docDistFile = loggingPath + "/min_doc_distances.csv";
+				try (PrintWriter out = new PrintWriter(new BufferedWriter(new FileWriter(docDistFile, true)))) {
+					out.println(strMinDocsDist.toString());
+				} catch (IOException e) {
+					e.printStackTrace();
+					System.err.println("Could not write minimum topic distance file");
+				}
+
+				if (printFirstNDocs.length > 1 && LDAUtils.inRangeInterval(iteration, printFirstNDocs)) {
+					// --- plda: added on July 10, 2021 ---
+					String fn = String.format(
+							asciiOutput.getAbsolutePath() + "/Theta_DxK"
+									+ "_" + nDocs
+									+ "_" + numTopics
+									+ "_%05d.csv",
+							iteration);
+
+					if (numDocuments > nDocs) {
+						double[][] thetaNew = new double[nDocs][numTopics];
+						for (int d = 0; d < nDocs; d++) {
+							thetaNew[d] = theta[d];
+						}
+						LDAUtils.writeASCIIDoubleMatrix(thetaNew, fn, ",");
+					} else {
+						LDAUtils.writeASCIIDoubleMatrix(theta, fn, ",");
+					}
+					// ----------- plda --------------
+				}
+
+				// Augmented Gibbs sampling of \phi
+				double[][] phi = LDAUtils.drawDirichlets(typeTopicCounts, beta);
+
+				// Compute Quantity B 
+				double minTopicDist = 1e+20;
+				int K = phi.length; // number of topics
+				int V = phi[0].length; // number of unique words in the vocabulary
+				for (int i = 0; i < K; i++) {
+					for (int j = 0; j < i; j++) {
+						// compute Euclidean distance between \phi_i, \phi_j
+						double topicDist = 0.0;
+						for (int v = 0; v < V; v++) {
+							topicDist += Math.pow(phi[i][v] - phi[j][v], 2.0);
+						}
+						topicDist = Math.sqrt(topicDist);
+						if (topicDist < minTopicDist) {
+							minTopicDist = topicDist;
+						}
+					}
+				}
+
+				// TODO: Find an efficient way to save the distances
+				String topicDistFile = loggingPath + "/min_topic_distances.csv";
+				try (PrintWriter out = new PrintWriter(new BufferedWriter(new FileWriter(topicDistFile, true)))) {
+					out.println(iteration + "," + minTopicDist);
+				} catch (IOException e) {
+					e.printStackTrace();
+					System.err.println("Could not write minimum topic distance file");
+				}
+
+				// Saves the phi matrix in every diagnostic iteration
+				if (savePhi) {
+					String fn = String.format(
+							asciiOutput.getAbsolutePath() + "/Phi_KxV"
+									+ "_" + K
+									+ "_" + V
+									+ "_%05d.csv",
+							iteration);
+					LDAUtils.writeASCIIDoubleMatrix(phi, fn, ",");
+				}
+			}
+			// End of changes on Jan 14, 2022 ---------
+
 
 			if (zSamplingTime >= maxExecTimeMillis){
 				break; 
@@ -183,13 +283,6 @@ public class SerialCollapsedLDA extends SimpleLDA implements LDAGibbsSampler {
 			currentIteration + 
 			") \n"
 			);
-		// System.out.println(
-		// 	"\nCGS: z sampling time (nanoseconds) = " + 
-		// 	zSamplingNano + 
-		// 	" (iteration: " + 
-		// 	currentIteration + 
-		// 	") \n"
-		// 	);
 
 	}
 

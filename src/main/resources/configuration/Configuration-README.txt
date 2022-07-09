@@ -88,6 +88,11 @@ dn_diagnostic_interval = -1
 # turn off by setting to -1   
 start_diagnostic = 500
 
+## To save phi samples 
+## Set start_diagnostic > 0 before this 
+save_phi = true 
+
+
 ## Measure Timing: If timing measurements should be done (takes time)
 measure_timing = false
 
@@ -152,6 +157,7 @@ percentage_split_size_topic = 1.0 # (1.0 = 100%)
 instability_period = 0
 
 ## Print N Docs interval: List the intervals in which Theta should be printed for the "print_ndocs_cnt" number of documents
+## Set start_diagnostic > 0 before setting this 
 print_ndocs_interval = 50,100, 150,200
 print_ndocs_cnt = 500 # Print theta for the first 500 documents
 

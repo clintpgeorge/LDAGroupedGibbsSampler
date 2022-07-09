@@ -524,7 +524,8 @@ public class UncollapsedParallelLDA extends ModifiedSimpleLDA implements LDAGibb
 		int [] defaultVal = {-1};
 		int [] output_interval = config.getIntArrayProperty("diagnostic_interval",defaultVal);
 
-		boolean printPhi = config.getPrintPhi();
+		// boolean printPhi = config.getPrintPhi();
+		boolean savePhi = config.getSavePhi();
 		int startDiagnostic = config.getStartDiagnostic(LDAConfiguration.START_DIAG_DEFAULT);
 		
 		File binOutput = null;
@@ -533,7 +534,7 @@ public class UncollapsedParallelLDA extends ModifiedSimpleLDA implements LDAGibb
 		}
 		// --- plda: added on July 10, 2021 --- 
 		File asciiOutput = null;
-		if (output_interval.length > 1 || printFirstNDocs.length > 1 || printFirstNTopWords.length > 1 || printPhi || startDiagnostic > 1) {
+		if (output_interval.length > 1 || printFirstNDocs.length > 1 || printFirstNTopWords.length > 1 || startDiagnostic > 1) {
 			asciiOutput = LoggingUtils.checkCreateAndCreateDir(config.getLoggingUtil().getLogDir().getAbsolutePath() + "/ascii");
 		}
 
@@ -654,20 +655,119 @@ public class UncollapsedParallelLDA extends ModifiedSimpleLDA implements LDAGibb
 			logger.finer("Time for sampling phi: " + phiSamplingTime + "ms\t");
 			phiSamplingTimeCum += phiSamplingTime; 
 
-			if (startDiagnostic > 0 && iteration >= startDiagnostic && printPhi) {
-				// LDAUtils.writeBinaryDoubleMatrix(
-				// 	phi, 
-				// 	iteration, 
-				// 	numTopics, 
-				// 	numTypes, 
-				// 	binOutput.getAbsolutePath() + "/phi");
-				String fn = String.format(
-					asciiOutput.getAbsolutePath() + "/Phi_KxV" 
-					+ "_" + phi.length 
-					+ "_" + phi[0].length 
-					+ "_%05d.csv", iteration);	
-				LDAUtils.writeASCIIDoubleMatrix(phi, fn, ",");	
+			// Start changes on Jan 14, 2022 ---------
+
+			int numDocuments = data.size();
+			if (startDiagnostic > 0 && iteration >= startDiagnostic) {
+
+				double[][] docTheta; // a D x K matrix
+				if (!this.whichModel.equals("ggs")) {
+					int[][] docTopicCounts = LDAUtils.getDocumentTopicCounts(data, numTopics, numDocuments);
+					docTheta = LDAUtils.drawDirichlets(docTopicCounts, alpha);
+				} else { // When GGS, we do not sampe theta matrix again
+					docTheta = new double[numDocuments][numTopics];
+					for (int didx = 0; didx < numDocuments; didx++) {
+						docTheta[didx] = this.thetaMatrix[didx];
+					}
+				}
+
+				StringBuilder strMinDocsDist = new StringBuilder();
+				strMinDocsDist.append(iteration);
+				for (int d = 0; d < numDocuments; d++) {
+					double minDocsDist = 1e+20;
+					for (int dd = 0; dd < numDocuments; dd++) {
+						if (d != dd) {
+							// compute Euclidean distance between \theta_d, \theta_s
+							double docDist = 0.0;
+							for (int k = 0; k < numTopics; k++) {
+								docDist += Math.pow(docTheta[d][k] - docTheta[dd][k], 2.0);
+							}
+							docDist = Math.sqrt(docDist);
+							if (docDist < minDocsDist) {
+								minDocsDist = docDist;
+							}
+						}
+					}
+					strMinDocsDist.append(",");
+					strMinDocsDist.append(minDocsDist);
+				}
+
+				// TODO: Find an efficient way to save the distances
+				String docDistFile = loggingPath + "/min_doc_distances.csv";
+				try (PrintWriter out = new PrintWriter(new BufferedWriter(new FileWriter(docDistFile, true)))) {
+					out.println(strMinDocsDist.toString());
+				} catch (IOException e) {
+					e.printStackTrace();
+					System.err.println("Could not write minimum topic distance file");
+				}
+
+				if (printFirstNDocs.length > 1 && LDAUtils.inRangeInterval(iteration, printFirstNDocs)) {
+					// --- plda: added on July 10, 2021 ---
+					String fn = String.format(
+							asciiOutput.getAbsolutePath() + "/Theta_DxK"
+									+ "_" + nDocs
+									+ "_" + numTopics
+									+ "_%05d.csv",
+							iteration);
+
+					if (numDocuments > nDocs) {
+						double[][] thetaNew = new double[nDocs][numTopics];
+						for (int d = 0; d < nDocs; d++) {
+							thetaNew[d] = docTheta[d];
+						}
+						LDAUtils.writeASCIIDoubleMatrix(thetaNew, fn, ",");
+					} else {
+						LDAUtils.writeASCIIDoubleMatrix(docTheta, fn, ",");
+					}
+					// ----------- plda --------------
+				}
+
+				// Compute Quantity B 
+				int K = phi.length; // number of topics
+				int V = phi[0].length; // number of unique words in the vocabulary
+				double minTopicDist = 1e+20;
+				for (int i = 0; i < K; i++) {
+					for (int j = 0; j < i; j++) {
+						// compute Euclidean distance between \phi_i, \phi_j
+						double topicDist = 0.0;
+						for (int v = 0; v < V; v++) {
+							topicDist += Math.pow(phi[i][v] - phi[j][v], 2.0);
+						}
+						topicDist = Math.sqrt(topicDist);
+						if (topicDist < minTopicDist) {
+							minTopicDist = topicDist;
+						}
+					}
+				}
+
+				// TODO: Find an efficient way to save the distances
+				String topicDistFile = loggingPath + "/min_topic_distances.csv";
+				try (PrintWriter out = new PrintWriter(new BufferedWriter(new FileWriter(topicDistFile, true)))) {
+					out.println(iteration + "," + minTopicDist);
+				} catch (IOException e) {
+					e.printStackTrace();
+					System.err.println("Could not write minimum topic distance file");
+				}
+
+				// Saves the phi matrix in every diagnostic iteration
+				if (savePhi) {
+					String fn = String.format(
+							asciiOutput.getAbsolutePath() + "/Phi_KxV"
+									+ "_" + K
+									+ "_" + V
+									+ "_%05d.csv",
+							iteration);
+					LDAUtils.writeASCIIDoubleMatrix(phi, fn, ",");
+				}
 			}
+
+			// End of changes on Jan 14, 2022 ---------
+
+			
+
+
+
+
 			if(output_interval.length == 2 && iteration >= output_interval[0] && iteration <= output_interval[1]) {
 				LDAUtils.writeBinaryDoubleMatrix(phi, iteration, numTopics, numTypes, binOutput.getAbsolutePath() + "/phi");
 				LDAUtils.writeBinaryIntMatrix(typeTopicCounts, iteration, numTypes, numTopics, binOutput.getAbsolutePath() + "/N");
@@ -691,7 +791,7 @@ public class UncollapsedParallelLDA extends ModifiedSimpleLDA implements LDAGibb
 				logState = new LogState(logLik, iteration, tw, loggingPath, logger);
 				loglikelihood.add(logLik);
 				LDAUtils.logLikelihoodToFile(logState);
-				logger.info("<" + iteration + "> Log Likelihood: " + logLik);
+				// logger.info("<" + iteration + "> Log Likelihood: " + logLik);
 				logger.fine(tw);
 				if(logTypeTopicDensity || logDocumentDensity) {
 					density = logTypeTopicDensity ? LDAUtils.calculateMatrixDensity(typeTopicCounts) : -1;
@@ -717,30 +817,6 @@ public class UncollapsedParallelLDA extends ModifiedSimpleLDA implements LDAGibb
 					LDAUtils.writeIntRowArray(tokensPerTopic, loggingPath +  "/tokens_per_topic.csv");
 				}
 			}
-			// --- plda: added on July 10, 2021 --- 
-			if( printFirstNDocs.length > 1 && LDAUtils.inRangeInterval(iteration, printFirstNDocs)) {
-				double[][] docTheta; // a nDocs x K matrix
-				if (!this.whichModel.equals("ggs")){
-					int [][] docTopicCounts = LDAUtils.getDocumentTopicCounts(data, numTopics, nDocs);
-					docTheta = LDAUtils.drawDirichlets(docTopicCounts, alpha);
-				}
-				else {
-					docTheta = new double[nDocs][numTopics];
-					for (int didx = 0; didx < nDocs; didx++) {
-						docTheta[didx] = this.thetaMatrix[didx];
-					}
-				}
-				// When GGS, we do not sampe theta matrix again 
-				// LDAUtils.writeBinaryDoubleMatrix(docTheta, iteration, binOutput.getAbsolutePath() + "/Theta_DxK");	
-
-				String fn = String.format(
-					asciiOutput.getAbsolutePath() + "/Theta_DxK" 
-					+ "_" + docTheta.length 
-					+ "_" + docTheta[0].length 
-					+ "_%05d.csv", iteration);	
-				LDAUtils.writeASCIIDoubleMatrix(docTheta, fn, ",");	
-			}
-			// ----------- plda --------------
 
 			if( printFirstNTopWords.length > 1 && LDAUtils.inRangeInterval(iteration, printFirstNTopWords)) {
 				// Assign these once

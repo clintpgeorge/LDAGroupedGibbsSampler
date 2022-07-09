@@ -34,7 +34,8 @@ public class SimpleLDAConfiguration implements LDAConfiguration {
 	int instability_period;
 	private double[] fixed_split_size_doc;
 	private int skipStep = 1;
-	private boolean savePhi;
+	private boolean savePhi = LDAConfiguration.SAVE_PHI;
+	private boolean savePhiMean; 
 	private int phiBurnIn = LDAConfiguration.PHI_BURN_IN_DEFAULT;
 	private String docLengthsFilename;
 	private boolean saveDocLengths;
@@ -335,6 +336,12 @@ public class SimpleLDAConfiguration implements LDAConfiguration {
 		return printPhi;
 	}
 
+	// Added on Jan 14, 2022 
+	@Override
+	public boolean getSavePhi() {
+		return savePhi;
+	}
+
 	@Override
 	public boolean getMeasureTiming() {
 		return measureTiming;
@@ -558,9 +565,9 @@ public class SimpleLDAConfiguration implements LDAConfiguration {
 		return phiMeansOutputFilename;
 	}
 
-	@Override
+	// @Override
 	public boolean savePhiMeans(boolean defaultVal) {
-		return savePhi;
+	 	return savePhiMean;
 	}
 
 	public void setPhiBurnIn(int phiBurnIn) {
@@ -578,7 +585,7 @@ public class SimpleLDAConfiguration implements LDAConfiguration {
 	}
 
 	public void setSavePhi(boolean savePhi) {
-		this.savePhi = savePhi;
+		this.savePhiMean = savePhi;
 	}
 	
 	@Override

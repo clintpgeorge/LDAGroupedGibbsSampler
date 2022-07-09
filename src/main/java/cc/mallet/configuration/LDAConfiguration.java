@@ -51,6 +51,9 @@ public interface LDAConfiguration {
 	public static final int DOCUMENT_SAMPLER_SPLIT_LIMIT_DEFAULT = 100;
 	public static final double HDP_K_PERCENTILE = .8;
 	public static final boolean COMPUTE_LIKELIHOOD = true;
+
+	public static final boolean SAVE_PHI = false; // added on Jan 14, 2022
+
 	public boolean computeLikelihood();
 
 	public LoggingUtils getLoggingUtil();
@@ -98,6 +101,9 @@ public interface LDAConfiguration {
 	public boolean getDebug();
 
 	public boolean getPrintPhi();
+
+	// added on Jan 14, 2022
+	public boolean getSavePhi();
 	
 	public int [] getIntArrayProperty(String key, int [] defaultValues);
 	

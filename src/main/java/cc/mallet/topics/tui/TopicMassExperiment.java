@@ -461,6 +461,11 @@ public class TopicMassExperiment {
 			return pc.getPrintPhi();
 		}
 
+		// added on Jan 14, 2022 
+		public boolean getSavePhi() {
+			return pc.getSavePhi();
+		}
+
 		public ReloadingStrategy getReloadingStrategy() {
 			return pc.getReloadingStrategy();
 		}

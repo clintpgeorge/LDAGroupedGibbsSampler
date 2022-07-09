@@ -11,7 +11,10 @@ java -jar target/pLDA-8.1.0.jar --run_cfg="plda-nips.cfg"
 java -jar target/pLDA-8.1.0.jar --run_cfg="plda-cats.cfg"
 java -jar target/pLDA-8.1.0.jar --run_cfg="plda-cats-beta0d01.cfg"
 java -jar target/pLDA-8.1.0.jar --run_cfg="plda-cats-test.cfg"
-java -jar target/pLDA-8.1.0.jar --run_cfg="plda-bt-cats-beta0d01.cfg"
-java -jar target/pLDA-8.1.0.jar --run_cfg="plda-bt-cats-beta0d1.cfg"
+java -jar target/pLDA-8.1.0.jar --run_cfg="runs/plda-cats-beta0d01.cfg"
+java -jar target/pLDA-8.1.0.jar --run_cfg="runs/plda-cats-beta0d1.cfg"
+java -jar target/pLDA-8.1.0.jar --run_cfg="runs/plda-cats-beta1.cfg"
+java -jar target/pLDA-8.1.0.jar --run_cfg="runs/plda-cats-beta10.cfg"
+
 
 
