@@ -208,6 +208,8 @@ public class ADLDA extends ParallelTopicModel implements LDAGibbsSampler {
 		ExecutorService executor = Executors.newFixedThreadPool(numThreads);
 
 		long execTimeCumMillis = 0; 
+		long diagnosticTimeCum = 0; 
+
 		for (int iteration = 1; iteration <= numIterations && !abort ; iteration++) {
 			currentIteration = iteration;
 
@@ -310,6 +312,10 @@ public class ADLDA extends ParallelTopicModel implements LDAGibbsSampler {
 
 			long elapsedMillis = System.currentTimeMillis() - iterationStart;
 			execTimeCumMillis += elapsedMillis; 
+
+			long endSamplingTime = System.currentTimeMillis();
+
+
 			if (showTopicsInterval > 0 && (iteration % showTopicsInterval == 0) && computeLikelihood)  {
 				logLik = modelLogLikelihood();
 				String wt = displayTopWords (wordsPerTopic, false);
@@ -460,6 +466,15 @@ public class ADLDA extends ParallelTopicModel implements LDAGibbsSampler {
 			// Reset densities
 			for (int i = 0; i < runnables.length; i++) {
 				runnables[i].setKdDensity(0);
+			}
+
+			diagnosticTimeCum += (System.currentTimeMillis() - endSamplingTime);
+
+			if(currentIteration % 100 == 0) { // this is for diagnostics 
+				System.out.println("Iteration: " + currentIteration +  
+				", Execution time: " + execTimeCumMillis + 
+				", Total diagnostics time: " + diagnosticTimeCum + 
+				" (in milliseconds)"); 
 			}
 
 			if (execTimeCumMillis >= maxExecTimeMillis){

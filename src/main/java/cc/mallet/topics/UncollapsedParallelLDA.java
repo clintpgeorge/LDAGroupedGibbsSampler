@@ -605,6 +605,7 @@ public class UncollapsedParallelLDA extends ModifiedSimpleLDA implements LDAGibb
 
 		long zSamplingTimeCum = 0;
 		long phiSamplingTimeCum = 0; 
+		long diagnosticTimeCum = 0; 
 		for (int iteration = 1; iteration <= iterations && !abort; iteration++) {
 			currentIteration = iteration;
 			if(hyperparameterOptimizationInterval > 1  && iteration % hyperparameterOptimizationInterval == 0) {
@@ -655,7 +656,10 @@ public class UncollapsedParallelLDA extends ModifiedSimpleLDA implements LDAGibb
 			logger.finer("Time for sampling phi: " + phiSamplingTime + "ms\t");
 			phiSamplingTimeCum += phiSamplingTime; 
 
-			// Start changes on Jan 14, 2022 ---------
+			// Start changes on Jan 14, 2022; July 16, 2022 ---------
+
+			long endSamplingTime = System.currentTimeMillis();
+
 
 			int numDocuments = data.size();
 			if (startDiagnostic > 0 && iteration >= startDiagnostic) {
@@ -845,6 +849,17 @@ public class UncollapsedParallelLDA extends ModifiedSimpleLDA implements LDAGibb
 
 			if(abortFile.exists()) {
 				abort();
+			}
+
+			diagnosticTimeCum += (System.currentTimeMillis() - endSamplingTime);
+
+			if(currentIteration % 100 == 0) { // this is for diagnostics 
+				System.out.println("Iteration: " + currentIteration + 
+				", Document sampling time: " + zSamplingTimeCum + 
+				", Topic sampling time: " + phiSamplingTimeCum + 
+				", Total sampling time: " + (zSamplingTimeCum + phiSamplingTimeCum) + 
+				", Total diagnostics time: " + diagnosticTimeCum + 
+				" (in milliseconds)"); 
 			}
 
 			//long iterEnd = System.currentTimeMillis();

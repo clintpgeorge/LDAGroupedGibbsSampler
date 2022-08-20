@@ -121,6 +121,7 @@ public class SerialCollapsedLDA extends SimpleLDA implements LDAGibbsSampler {
 
 
 		long zSamplingTime = 0; 
+		long diagnosticTimeCum = 0; 
 
 		for (int iteration = 1; iteration <= iterations && !abort; iteration++) {
 			currentIteration = iteration;
@@ -140,6 +141,8 @@ public class SerialCollapsedLDA extends SimpleLDA implements LDAGibbsSampler {
 			long elapsedMillis = System.currentTimeMillis();
 			zSamplingTime += (elapsedMillis - iterationStart); // accumulate the time 
 			logger.fine(iteration + "\t" + (elapsedMillis - iterationStart) + "ms\t");
+
+			long endSamplingTime = System.currentTimeMillis();
 
 			if(config!= null) { 
 				config.getLoggingUtil().logTiming(new Timing(iterationStart,elapsedMillis,"CollapsedSample_Z"));
@@ -269,6 +272,15 @@ public class SerialCollapsedLDA extends SimpleLDA implements LDAGibbsSampler {
 				}
 			}
 			// End of changes on Jan 14, 2022 ---------
+
+			diagnosticTimeCum += (System.currentTimeMillis() - endSamplingTime);
+
+			if(currentIteration % 100 == 0) { // this is for diagnostics 
+				System.out.println("Iteration: " + currentIteration +  
+				", z sampling time: " + zSamplingTime + 
+				", Total diagnostics time: " + diagnosticTimeCum + 
+				" (in milliseconds)"); 
+			}
 
 
 			if (zSamplingTime >= maxExecTimeMillis){
