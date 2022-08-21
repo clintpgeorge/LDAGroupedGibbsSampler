@@ -30,6 +30,7 @@ target/*
 .project
 .classpath
 .vscode/*
+example-cmd-runs.txt
 
 # Mac files 
 .DS_Store 
