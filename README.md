@@ -1,93 +1,55 @@
-[![Build Status](https://travis-ci.org/lejon/PartiallyCollapsedLDA.svg?branch=master)](https://travis-ci.org/lejon/PartiallyCollapsedLDA) 
+# LDA Gibbs Samplers 
 
-![YourKit](https://www.yourkit.com/images/yklogo.png)
+This project is forked from the repository [PartiallyCollapsedLDA](https://github.com/lejon/PartiallyCollapsedLDA). PartiallyCollapsedLDA implemented parallel algorithms mentioned in 
+[Magnusson et al. (2018)][1] and [Terenin et al. (2018)][2] and for comparative study, a few other Gibbs samplers are available in the literature, e.g., Collapsed Gibbs Sampler (CGS Griffiths and Steyvers, 2004), for the Latent Dirichlet Allocation ([LDA][6]) model. 
 
-PC-LDA
-=====
-Repo for our Partially Collapsed Parallel LDA implementations described in the articles: 
+The **main** Java `class` is `cc.mallet.topics.tui.ParallelLDA` ([ParallelLDA.java](src/main/java/cc/mallet/topics/tui/ParallelLDA.java)). This fork added/edited the following Gibbs samplers mainly to facilitate analyses in [Doss and George (2022)][3]. 
 
-Måns Magnusson, Leif Jonsson, Mattias Villani, and David Broman. (2017). Sparse Partially Collapsed MCMC for Parallel Inference in Topic Models. Journal of Computational and Graphical Statistics.
+1. **Collapsed Gibbs Sampler** (CGS, [Griffiths and Steyvers 2004][4]). It is a serial implementation of CGS; see the class file: [SerialCollapsedLDA.java](src/main/java/cc/mallet/topics/SerialCollapsedLDA.java)
+   
+2. **Partially Collapsed Gibbs** Sampler (PCGS, [Magnusson et al. 2018][1]). It is a parallel implementation of PCGS; see the class file: [UncollapsedParallelLDA.java](src/main/java/cc/mallet/topics/UncollapsedParallelLDA.java)
 
-```
-@article{magnusson2017sparse,
-  title={Sparse Partially Collapsed MCMC for Parallel Inference in Topic Models},
-  author={Magnusson, M{\aa}ns and Jonsson, Leif and Villani, Mattias and Broman, David},
-  journal={Journal of Computational and Graphical Statistics},
-  year={2017},
-  publisher={Taylor \& Francis}
-}
-```
+3. **Grouped Gibbs Sampler** (GGS, [Doss and George 2022][3]). It is a parallel implementation of GGS; see the class file: [LDAGroupedGibbsSampler.java](src/main/java/cc/mallet/topics/LDAGroupedGibbsSampler.java)
 
-Alexander Terenin, Måns Magnusson, Leif Jonsson, and David Draper. “Polya Urn Latent Dirichlet Allocation: a doubly sparse massively parallel sampler”. In IEEE Transactions on Pattern Analysis and Machine Intelligence. 2017.
+4. **Approximate Distributed LDA** (ADLDA, [Newman et al. 2009][5]). See the class file: [ADLDA.java](src/main/java/cc/mallet/topics/ADLDA.java)
 
-```
-@inproceedings{jonsson:2018,
-	author={{Terenin}, Alexander and {Magnusson}, M{\aa}ns and {Jonsson}, 
-	Leif and {Draper}, David},
-	title={Polya Urn Latent Dirichlet Allocation: a doubly sparse massively 
-	parallel sampler},
-	booktitle={Accepted for publication in IEEE Transactions on Pattern Analysis and 
-	Machine Intelligence}
-}
-```
-
-The toolkit is Open Source Software, and is released under the Common Public License. You are welcome to use the code under the terms of the license for research or commercial purposes, however please acknowledge its use with a citation:
-  Terenin, Magnusson, Jonsson.  "Polya Urn Latent Dirichlet Allocation: a doubly sparse massively parallel sampler"
-
-The dataset (in the datasets folder) and the stopwords file (stopwords.txt, included in the repository) should be in the same folder as you run the sampler.
-
-Example Run command:
-```
-java -cp PCPLDA-X.X.X.jar cc.mallet.topics.tui.ParallelLDA --run_cfg=src/main/resources/configuration/PLDAConfig.cfg
-java -jar PCPLDA-X.X.X.jar --run_cfg=src/main/resources/configuration/PLDAConfig.cfg
-```
-
-(PCPLDA-X.X.X.jar is created in the 'target' folder by the 'mvn package' command)
-
-For very large datasets you might need to add the -Xmx60g flag to Java
-
-Please remember that this is a research prototype and the standard disclaimers apply.
-You will see printouts during unit tests, commented out code, old stuff not cleaned out yet etc.
- 
-But the basic sampler is tested and evaluated in a scientific manner and we have gone to great pains to ensure that it is correct.
-The sampler that is referred to in the article as "PC sampler" or "PC-LDA" corresponds to the class 
-'cc.mallet.topics.SpaliasUncollapsedParallelLDA' in the code for the sparse parallel and 
-'cc.mallet.topics.PolyaUrnSpaliasLDA' for the Polya Urn version. 
-The variable selection parts are implemented in the 'cc.mallet.topics.NZVSSpaliasUncollapsedParallelLDA' class.
-
-An example of a "main" class is cc.mallet.topics.tui.ParallelLDA
-
-## Installation
-
-1. Install Apache Maven
-2. Install the package using maven as follows:
-
-```mvn package```
-in bash.
-
-Occasionally some of the "probabilistic" tests fail due to random chance. This is ok in a statistical sense but not for a test suite so this should eventually be tuned. For now if the suite is re-run it should be ok.
-
-To install without running tests use
-
-```mvn package -DskipTests```
-in bash.
+## Building, installation, and execution
 
 
-## Example run using binary (the release JAR)
+Install Apache [Maven](https://maven.apache.org/). To build the source code and package, use the following command in `bash` (it skips tests) 
 
-```java -cp PCPLDA-4.7.3.jar cc.mallet.topics.tui.ParallelLDA --run_cfg=src/main/resources/configuration/PLDAConfig.cfg```
+    mvn -T 1C package -DskipTests -Dmaven.test.skip=true
 
-## Public DOI
-[![DOI](https://zenodo.org/badge/13374/lejon/PartiallyCollapsedLDA.svg)](http://dx.doi.org/10.5281/zenodo.18102)
+or 
 
-Acknowledgements
-----------------
-I'm a very satisfied user of the YourKit profiler. A Great product with great support. It has been sucessfully used for profiling in this project.
+    "/opt/apache-maven-3.6.3/bin/mvn" -T 1C package -DskipTests -Dmaven.test.skip=true,
 
-![YourKit](https://www.yourkit.com/images/yklogo.png)
+when  `mvn` (Version 3.6.3) is unavailable in the path. Modify the path according to the `mvn` installation. Modify the `mvn` configuration file [pom.xml](pom.xml) if required. This command creates a jar file `PCPLDA-X.X.X.jar` in the `target` folder (as specified in the configuration file: [pom.xml](pom.xml)).
 
-YourKit supports open source projects with its full-featured Java Profiler.
-YourKit, LLC is the creator of [YourKit Java Profiler](https://www.yourkit.com/java/profiler/)
-and [YourKit .NET Profiler](https://www.yourkit.com/.net/profiler/),
-innovative and intelligent tools for profiling Java and .NET applications.
+To execute, prepare a configuration file; see [Configuration-README.txt](src/main/resources/configuration/Configuration-README.txt) for more details. The [configuration](src/main/resources/configuration) folder has a few example configuration files. The `dataset` folder has different test corpora. A stopwords file (`stopwords.txt`) is available in the repository. 
 
+To run, use, for example. 
+
+    java -jar target/pLDA-8.1.0.jar --run_cfg="plda-cats-test.cfg"
+
+Note: plda-cats-test.cfg is available in [configuration](src/main/resources/configuration). 
+
+
+
+## Acknowledgements
+
+We thank the authors of [PartiallyCollapsedLDA](https://github.com/lejon/PartiallyCollapsedLDA) for making the source code and corpora publically available. 
+
+## References 
+
+  [1]: Magnusson, M., Jonsson, L., Villani, M., & Broman, D. (2018). Sparse partially collapsed MCMC for parallel inference in topic models. Journal of Computational and Graphical Statistics, 27(2), 449-463.
+  
+  [2]: Terenin, A., Magnusson, M., Jonsson, L., & Draper, D. (2018). Polya Urn Latent Dirichlet Allocation: a doubly sparse massively parallel sampler. IEEE transactions on pattern analysis and machine intelligence, 41(7), 1709-1719.
+
+  [3]: Doss, H. and George, C. (2022). Theoretical and Empirical Evaluation of a Grouped Gibbs Sampler for Parallel Computation in the Latent Dirichlet Allocation Model. In preparation. 
+
+  [4]: Griffiths, T. L., & Steyvers, M. (2004). Finding scientific topics. Proceedings of the National academy of Sciences, 101(suppl_1), 5228-5235.
+
+  [5]: Newman, D., Asuncion, A., Smyth, P., & Welling, M. (2009). Distributed algorithms for topic models. Journal of Machine Learning Research, 10(8).
+
+  [6]: Blei, D. M., Ng, A. Y., & Jordan, M. I. (2003). Latent dirichlet allocation. Journal of machine Learning research, 3(Jan), 993-1022.
