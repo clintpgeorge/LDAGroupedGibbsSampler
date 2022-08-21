@@ -1,5 +1,7 @@
 # LDA Gibbs Samplers 
 
+[Clint P. George](https://iitgoa.ac.in/~clint), [Hani Doss](https://users.stat.ufl.edu/~doss/) 
+
 This project is forked from the repository [PartiallyCollapsedLDA](https://github.com/lejon/PartiallyCollapsedLDA). PartiallyCollapsedLDA implemented parallel algorithms mentioned in 
 [Magnusson et al. (2018)](#1) and [Terenin et al. (2018)](#2) and for comparative study, a few other Gibbs samplers are available in the literature, e.g., Collapsed Gibbs Sampler ([CGS](#4), Griffiths and Steyvers, 2004), for the Latent Dirichlet Allocation ([LDA](#6)) model. 
 
