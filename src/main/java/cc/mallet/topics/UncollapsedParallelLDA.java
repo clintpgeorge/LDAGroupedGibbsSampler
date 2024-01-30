@@ -666,9 +666,12 @@ public class UncollapsedParallelLDA extends ModifiedSimpleLDA implements LDAGibb
 
 				double[][] docTheta; // a D x K matrix
 				if (!this.whichModel.equals("ggs")) {
+					// This is for PCGS/UncollapsedParallelLDA, 
+					// augmented theta sampling 
 					int[][] docTopicCounts = LDAUtils.getDocumentTopicCounts(data, numTopics, numDocuments);
 					docTheta = LDAUtils.drawDirichlets(docTopicCounts, alpha);
-				} else { // When GGS, we do not sampe theta matrix again
+				} else { 
+					// When GGS, we do not sample theta matrix again
 					docTheta = new double[numDocuments][numTopics];
 					for (int didx = 0; didx < numDocuments; didx++) {
 						docTheta[didx] = this.thetaMatrix[didx];

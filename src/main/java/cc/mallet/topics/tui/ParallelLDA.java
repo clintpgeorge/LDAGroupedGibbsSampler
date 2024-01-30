@@ -22,6 +22,7 @@ import cc.mallet.topics.EfficientUncollapsedParallelLDA;
 import cc.mallet.topics.HDPSamplerWithPhi;
 import cc.mallet.topics.LDAGibbsSampler;
 import cc.mallet.topics.LDAGroupedGibbsSampler;
+import cc.mallet.topics.LDAPartiallyCollapsedGibbsSampler;
 // import cc.mallet.topics.LDAGroupedGibbsSamplerTest;
 import cc.mallet.topics.LDASamplerWithCallback;
 import cc.mallet.topics.LDASamplerWithPhi;
@@ -481,6 +482,12 @@ public class ParallelLDA implements IterationListener {
 		case "adlda": {
 			model = new ADLDA(config);
 			System.out.println("Approximate Distributed LDA. ADLDA by Newman et al. (2009).");
+			break;
+		}
+		// we fixed some of the issues of PCGS and added as a new class 
+		case "pcgs": {
+			model = new LDAPartiallyCollapsedGibbsSampler(config);
+			System.out.println("Partially Collapsed Gibbs Sampler. PCGS by Magnusson et al. (2018).");
 			break;
 		}
 		case "uncollapsed": {
