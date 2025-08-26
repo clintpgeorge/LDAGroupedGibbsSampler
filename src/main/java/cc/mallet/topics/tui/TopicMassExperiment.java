@@ -1091,5 +1091,11 @@ public class TopicMassExperiment {
 		public int getMaxExecTimeSeconds(int maxExecTime){
 			return getInteger("exec_time", maxExecTime);
 		}
+
+
+		@Override
+		public boolean computeDocTopicDistances(boolean defaultValue) { // Added on June 4, 2025 
+			return getBoolean("compute_doc_topic_distances", defaultValue);
+		}
 	}
 }

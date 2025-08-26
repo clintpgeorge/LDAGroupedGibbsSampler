@@ -100,8 +100,8 @@ public class LDAPartiallyCollapsedGibbsSampler extends UncollapsedParallelLDA im
 			phiMatrix[topic] = topicDirichletSampler.nextDistribution();
 
 			if (savePhiMeans() && samplePhiThisIteration()) {
-				for (int phi = 0; phi < phiMatrix[topic].length; phi++) {
-					phiMean[topic][phi] += phiMatrix[topic][phi];
+				for (int v = 0; v < phiMatrix[topic].length; v++) {
+					phiMean[topic][v] += phiMatrix[topic][v];
 				}
 			}
 		}

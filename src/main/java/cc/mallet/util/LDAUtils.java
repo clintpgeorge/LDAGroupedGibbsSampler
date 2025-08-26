@@ -177,7 +177,7 @@ public class LDAUtils {
 						config.getMaxDocumentBufferSize(LDAConfiguration.MAX_DOC_BUFFFER_SIZE_DEFAULT), 
 						config.getKeepConnectingPunctuation(LDAConfiguration.KEEP_CONNECTING_PUNCTUATION), alphabet);
 			}
-		}
+		}		
 		return instances;
 	}
 	
@@ -941,18 +941,35 @@ public class LDAUtils {
 	
 	public static void logLikelihoodToFile(double logLik, int iteration, 
 			String wordsPerTopic, String loggingPath, Logger logger) {
-		logger.info("\n<" + iteration + "> Log Likelihood: " + logLik + "\n" +wordsPerTopic);
-		String likelihoodFile = loggingPath + "/likelihood.txt";
+		// logger.info("\n<" + iteration + "> Log Likelihood: " + logLik + "\n" +wordsPerTopic);
+		String likelihoodFile = loggingPath + "/log-likelihood.txt";
 		try(PrintWriter out = new PrintWriter(new BufferedWriter(
 				new FileWriter(likelihoodFile, true)))) {
 			out.println(iteration + "\t" + logLik + "\t" + System.currentTimeMillis());
 		} catch (IOException e) {
+			logger.severe("Failed to write log likelihood to file: " + e.getMessage());
 			throw new IllegalStateException(e);
 		}
 	}	
+
+	public static void logPosteriorToFile(double logPosterior, int iteration, String loggingPath, Logger logger) {
+		// Log to console/file via logger
+		// logger.info(String.format("%n<%d> Log Posterior: %.6f", iteration, logPosterior));
+
+		// Write to file in a robust and efficient way
+		String posteriorFile = loggingPath + "/log-posterior.txt";
+		try (PrintWriter out = new PrintWriter(new BufferedWriter(new FileWriter(posteriorFile, true)))) {
+			// Use tab-separated values and ISO 8601 timestamp for clarity
+			out.printf("%d\t%.6f\t%d%n", iteration, logPosterior, System.currentTimeMillis());
+		} catch (IOException e) {
+			logger.severe("Failed to write log posterior to file: " + e.getMessage());
+			throw new IllegalStateException(e);
+		}
+	}	
+
 	
 	public static void logLikelihoodToFile(LogState parameterObject) {
-		String likelihoodFile = parameterObject.loggingPath + "/likelihood.txt";
+		String likelihoodFile = parameterObject.loggingPath + "/log-likelihood.txt";
 		try(PrintWriter out = new PrintWriter(new BufferedWriter(
 				new FileWriter(likelihoodFile, true)))) {
 			out.println(parameterObject.iteration + "\t" + parameterObject.logLik);

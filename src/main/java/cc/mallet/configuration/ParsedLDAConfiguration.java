@@ -384,6 +384,11 @@ public class ParsedLDAConfiguration extends SubConfig implements Configuration, 
 	// ----------- plda --------------
 
 	@Override
+	public boolean computeDocTopicDistances(boolean defaultValue) { // Added on June 4, 2025 
+		return getBoolean("compute_doc_topic_distances", defaultValue);
+	}
+
+	@Override
 	public Integer getTfIdfVocabSize(int defaultValue) {
 		return getInteger("tfidf_vocab_size",defaultValue);
 	}

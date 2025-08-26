@@ -9,6 +9,10 @@ import java.io.FileOutputStream;
 import java.io.FileWriter;
 import java.io.IOException;
 import java.io.PrintWriter;
+import java.lang.management.ManagementFactory;
+import java.lang.management.MemoryMXBean;
+import java.lang.management.MemoryUsage;
+import java.lang.management.ThreadMXBean;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
@@ -25,7 +29,11 @@ import java.util.concurrent.RecursiveAction;
 import java.util.concurrent.ThreadLocalRandom;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.atomic.AtomicLong;
+import java.util.logging.FileHandler;
 import java.util.logging.Level;
+import java.util.logging.Logger;
+import java.util.logging.SimpleFormatter;
 
 import cc.mallet.configuration.LDAConfiguration;
 import cc.mallet.topics.randomscan.document.BatchBuilderFactory;
@@ -55,6 +63,9 @@ import gnu.trove.TIntIntProcedure;
 public class UncollapsedParallelLDA extends ModifiedSimpleLDA implements LDAGibbsSampler, LDASamplerWithPhi {
 
 	private static final long serialVersionUID = 1L;
+	protected static Logger logger = Logger.getLogger(UncollapsedParallelLDA.class.getName());	
+	protected static FileHandler fileHandler; 
+
 	protected double[][] phi; // phi[topic][type]
 	// This matrix will hold a cumulated sample of phi, when it is retrieved we calculate the mean by dividing with how many phi we have sampled
 	protected double[][] phiMean;
@@ -64,7 +75,8 @@ public class UncollapsedParallelLDA extends ModifiedSimpleLDA implements LDAGibb
 	protected int noSampledPhi= 0;
 
 	// This matrix keeps the document theta samples
-	protected double[][] thetaMatrix; // a D x K matrix
+	protected double[][] thetaMatrix; // a D x K matrix (see whether this is redundant)
+	protected double[][] theta; // a D x K matrix --- used only for diagnostics 
 	protected int numDocuments;
 	protected String whichModel;
 	
@@ -105,6 +117,7 @@ public class UncollapsedParallelLDA extends ModifiedSimpleLDA implements LDAGibb
 
 	// Used for inefficiency calculations
 	protected int [][] topIndices = null;
+	protected boolean computeDocTopicDistances = false; // default is false 
 
 	AtomicInteger kdDensities = new AtomicInteger();
 	long [] zTimings;
@@ -116,12 +129,35 @@ public class UncollapsedParallelLDA extends ModifiedSimpleLDA implements LDAGibb
 	int documentSplitLimit;
 	
 	File abortFile = new File("abort");
+
+	private static final int RESOURCE_LOG_INTERVAL = 100; // Log resource usage every 100 iterations
+	private long totalHeapMemoryUsed = 0;
+	private long totalNonHeapMemoryUsed = 0;
+	private long totalThreadCount = 0;
+	private int iterationCount = 0;
+	private AtomicLong totalIpcTime = new AtomicLong(0); // Tracks total IPC time in nanoseconds
 	
-	public UncollapsedParallelLDA(LDAConfiguration config) {
+	public UncollapsedParallelLDA(LDAConfiguration 	config) {
 		super(config);
 
-		this.whichModel = config.getScheme(); // to check which algorithm is running 
-
+		this.whichModel = config.getScheme(); // to check which algorithm is running
+		
+		try {
+			String allLogFile = config.getLoggingUtil().getLogDir().getAbsolutePath() + "/" + this.whichModel + "-execution-log.txt";
+			fileHandler = new FileHandler(allLogFile, true);
+			fileHandler.setEncoding("UTF-8");
+			fileHandler.setLevel(java.util.logging.Level.ALL);
+			fileHandler.setFormatter(new SimpleFormatter());
+			fileHandler.setFilter(null);
+			logger.setLevel(java.util.logging.Level.ALL);
+			logger.setUseParentHandlers(false);
+			logger.addHandler(fileHandler);
+		} catch (IOException e) {
+			e.printStackTrace();
+			throw new RuntimeException("Failed to initialize FileHandler for logging", e);
+		}
+		showTopicsInterval = config.getTopicInterval(LDAConfiguration.TOPIC_INTER_DEFAULT);
+		computeDocTopicDistances = config.computeDocTopicDistances(LDAConfiguration.COMPUTE_DOC_TOPIC_DISTANCES_DEFAULT);
 		documentSamplerPool = new ForkJoinPool(Runtime.getRuntime().availableProcessors());
 		
 		// With job stealing we can only have one global z / counts timing
@@ -660,53 +696,63 @@ public class UncollapsedParallelLDA extends ModifiedSimpleLDA implements LDAGibb
 
 			long endSamplingTime = System.currentTimeMillis();
 
+			// Log progress at regular intervals
+			logMemoryAndThreadMetrics();
+			iterationCount++; // Increment the iteration count for logging purposes 
+			if (iteration % RESOURCE_LOG_INTERVAL == 0) 
+				logDetailedMetrics(iteration, loggingPath);
+
 
 			int numDocuments = data.size();
 			if (startDiagnostic > 0 && iteration >= startDiagnostic) {
 
-				double[][] docTheta; // a D x K matrix
+				
 				if (!this.whichModel.equals("ggs")) {
 					// This is for PCGS/UncollapsedParallelLDA, 
 					// augmented theta sampling 
 					int[][] docTopicCounts = LDAUtils.getDocumentTopicCounts(data, numTopics, numDocuments);
-					docTheta = LDAUtils.drawDirichlets(docTopicCounts, alpha);
+					theta = LDAUtils.drawDirichlets(docTopicCounts, alpha);
 				} else { 
 					// When GGS, we do not sample theta matrix again
-					docTheta = new double[numDocuments][numTopics];
+					theta = new double[numDocuments][numTopics];
 					for (int didx = 0; didx < numDocuments; didx++) {
-						docTheta[didx] = this.thetaMatrix[didx];
+						theta[didx] = this.thetaMatrix[didx];
 					}
 				}
 
-				StringBuilder strMinDocsDist = new StringBuilder();
-				strMinDocsDist.append(iteration);
-				for (int d = 0; d < numDocuments; d++) {
-					double minDocsDist = 1e+20;
-					for (int dd = 0; dd < numDocuments; dd++) {
-						if (d != dd) {
-							// compute Euclidean distance between \theta_d, \theta_s
-							double docDist = 0.0;
-							for (int k = 0; k < numTopics; k++) {
-								docDist += Math.pow(docTheta[d][k] - docTheta[dd][k], 2.0);
-							}
-							docDist = Math.sqrt(docDist);
-							if (docDist < minDocsDist) {
-								minDocsDist = docDist;
+				if (computeDocTopicDistances) {
+					StringBuilder strMinDocsDist = new StringBuilder();
+					strMinDocsDist.append(iteration);
+					for (int d = 0; d < numDocuments; d++) {
+						double minDocsDist = 1e+20;
+						for (int dd = 0; dd < numDocuments; dd++) {
+							if (d != dd) {
+								// compute Euclidean distance between \theta_d, \theta_s
+								double docDist = 0.0;
+								for (int k = 0; k < numTopics; k++) {
+									docDist += Math.pow(theta[d][k] - theta[dd][k], 2.0);
+								}
+								docDist = Math.sqrt(docDist);
+								if (docDist < minDocsDist) {
+									minDocsDist = docDist;
+								}
 							}
 						}
+						strMinDocsDist.append(",");
+						strMinDocsDist.append(minDocsDist);
 					}
-					strMinDocsDist.append(",");
-					strMinDocsDist.append(minDocsDist);
+
+					// TODO: Find an efficient way to save the distances
+					String docDistFile = loggingPath + "/min_doc_distances.csv";
+					try (PrintWriter out = new PrintWriter(new BufferedWriter(new FileWriter(docDistFile, true)))) {
+						out.println(strMinDocsDist.toString());
+					} catch (IOException e) {
+						e.printStackTrace();
+						System.err.println("Could not write minimum topic distance file");
+					}
 				}
 
-				// TODO: Find an efficient way to save the distances
-				String docDistFile = loggingPath + "/min_doc_distances.csv";
-				try (PrintWriter out = new PrintWriter(new BufferedWriter(new FileWriter(docDistFile, true)))) {
-					out.println(strMinDocsDist.toString());
-				} catch (IOException e) {
-					e.printStackTrace();
-					System.err.println("Could not write minimum topic distance file");
-				}
+				
 
 				if (printFirstNDocs.length > 1 && LDAUtils.inRangeInterval(iteration, printFirstNDocs)) {
 					// --- plda: added on July 10, 2021 ---
@@ -720,40 +766,43 @@ public class UncollapsedParallelLDA extends ModifiedSimpleLDA implements LDAGibb
 					if (numDocuments > nDocs) {
 						double[][] thetaNew = new double[nDocs][numTopics];
 						for (int d = 0; d < nDocs; d++) {
-							thetaNew[d] = docTheta[d];
+							thetaNew[d] = theta[d];
 						}
 						LDAUtils.writeASCIIDoubleMatrix(thetaNew, fn, ",");
 					} else {
-						LDAUtils.writeASCIIDoubleMatrix(docTheta, fn, ",");
+						LDAUtils.writeASCIIDoubleMatrix(theta, fn, ",");
 					}
 					// ----------- plda --------------
 				}
 
 				// Compute Quantity B 
+				// the phi matrix is KxV; confirmed on June 6, 2025 
 				int K = phi.length; // number of topics
 				int V = phi[0].length; // number of unique words in the vocabulary
-				double minTopicDist = 1e+20;
-				for (int i = 0; i < K; i++) {
-					for (int j = 0; j < i; j++) {
-						// compute Euclidean distance between \phi_i, \phi_j
-						double topicDist = 0.0;
-						for (int v = 0; v < V; v++) {
-							topicDist += Math.pow(phi[i][v] - phi[j][v], 2.0);
-						}
-						topicDist = Math.sqrt(topicDist);
-						if (topicDist < minTopicDist) {
-							minTopicDist = topicDist;
+				if (computeDocTopicDistances) {
+					double minTopicDist = 1e+20;
+					for (int i = 0; i < K; i++) {
+						for (int j = 0; j < i; j++) {
+							// compute Euclidean distance between \phi_i, \phi_j
+							double topicDist = 0.0;
+							for (int v = 0; v < V; v++) {
+								topicDist += Math.pow(phi[i][v] - phi[j][v], 2.0);
+							}
+							topicDist = Math.sqrt(topicDist);
+							if (topicDist < minTopicDist) {
+								minTopicDist = topicDist;
+							}
 						}
 					}
-				}
 
-				// TODO: Find an efficient way to save the distances
-				String topicDistFile = loggingPath + "/min_topic_distances.csv";
-				try (PrintWriter out = new PrintWriter(new BufferedWriter(new FileWriter(topicDistFile, true)))) {
-					out.println(iteration + "," + minTopicDist);
-				} catch (IOException e) {
+					// TODO: Find an efficient way to save the distances
+					String topicDistFile = loggingPath + "/min_topic_distances.csv";
+					try (PrintWriter out = new PrintWriter(new BufferedWriter(new FileWriter(topicDistFile, true)))) {
+						out.println(iteration + "," + minTopicDist);
+					} catch (IOException e) {
 					e.printStackTrace();
 					System.err.println("Could not write minimum topic distance file");
+					}
 				}
 
 				// Saves the phi matrix in every diagnostic iteration
@@ -766,12 +815,14 @@ public class UncollapsedParallelLDA extends ModifiedSimpleLDA implements LDAGibb
 							iteration);
 					LDAUtils.writeASCIIDoubleMatrix(phi, fn, ",");
 				}
+
+				// Start changes on May 21, 2025 ----------
+				double logPosterior = computeLogPosterior();	
+				LDAUtils.logPosteriorToFile(logPosterior, iteration, loggingPath, logger);
+				// End changes on May 21, 2025 ---------
 			}
 
 			// End of changes on Jan 14, 2022 ---------
-
-			
-
 
 
 
@@ -782,10 +833,9 @@ public class UncollapsedParallelLDA extends ModifiedSimpleLDA implements LDAGibb
 			}
 
 			logger.finer("\nIteration " + iteration + "\tTotal time: " + elapsedMillis + "ms\t");
-			logger.finer("--------------------");
 
-			// Occasionally print more information
-			if (showTopicsInterval > 0 && (iteration % showTopicsInterval == 0) && computeLikelihood) {
+			// Compute the log likelihood of the model and save to the log file 
+			if (computeLikelihood) {
 				
 				if(testSet != null) {
 					heldOutLL = evaluator.evaluateLeftToRight(testSet, numParticles, null);					
@@ -798,31 +848,36 @@ public class UncollapsedParallelLDA extends ModifiedSimpleLDA implements LDAGibb
 				logState = new LogState(logLik, iteration, tw, loggingPath, logger);
 				loglikelihood.add(logLik);
 				LDAUtils.logLikelihoodToFile(logState);
-				// logger.info("<" + iteration + "> Log Likelihood: " + logLik);
-				logger.fine(tw);
-				if(logTypeTopicDensity || logDocumentDensity) {
-					density = logTypeTopicDensity ? LDAUtils.calculateMatrixDensity(typeTopicCounts) : -1;
-					docDensity = kdDensities.get() / (double) numTopics / data.size();
-					phiDensity = logPhiDensity ? LDAUtils.calculatePhiDensity(phi) : -1;
-					if(testSet!=null) {
-						stats = new Stats(iteration, loggingPath, elapsedMillis, zSamplingTokenUpdateTime, phiSamplingTime, 
-								density, docDensity, zTimings, countTimings,phiDensity,heldOutLL);						
-					} else {
-						stats = new Stats(iteration, loggingPath, elapsedMillis, zSamplingTokenUpdateTime, phiSamplingTime, 
-							density, docDensity, zTimings, countTimings,phiDensity);
+
+				// Occasionally print more information
+				if (showTopicsInterval > 0 && (iteration % showTopicsInterval == 0)){
+					// logger.info("<" + iteration + "> Log Likelihood: " + logLik);
+					logger.fine(tw);
+					if(logTypeTopicDensity || logDocumentDensity) {
+						density = logTypeTopicDensity ? LDAUtils.calculateMatrixDensity(typeTopicCounts) : -1;
+						docDensity = kdDensities.get() / (double) numTopics / data.size();
+						phiDensity = logPhiDensity ? LDAUtils.calculatePhiDensity(phi) : -1;
+						if(testSet!=null) {
+							stats = new Stats(iteration, loggingPath, elapsedMillis, zSamplingTokenUpdateTime, phiSamplingTime, 
+									density, docDensity, zTimings, countTimings,phiDensity,heldOutLL);						
+						} else {
+							stats = new Stats(iteration, loggingPath, elapsedMillis, zSamplingTokenUpdateTime, phiSamplingTime, 
+								density, docDensity, zTimings, countTimings,phiDensity);
+						}
+						LDAUtils.logStatsToFile(stats);
 					}
-					LDAUtils.logStatsToFile(stats);
+					
+					// WARNING: This will SUBSTANTIALLY slow down the sampler
+					if(config.logTopicIndicators(false)) {
+						logTopicIndicators();
+						System.out.println("Logged topic indicators for iteration: " + getCurrentIteration());
+					}
+					
+					if(logTokensPerTopics) {
+						LDAUtils.writeIntRowArray(tokensPerTopic, loggingPath +  "/tokens_per_topic.csv");
+					}
 				}
 				
-				// WARNING: This will SUBSTANTIALLY slow down the sampler
-				if(config.logTopicIndicators(false)) {
-					logTopicIndicators();
-					System.out.println("Logged topic indicators for iteration: " + getCurrentIteration());
-				}
-				
-				if(logTokensPerTopics) {
-					LDAUtils.writeIntRowArray(tokensPerTopic, loggingPath +  "/tokens_per_topic.csv");
-				}
 			}
 
 			if( printFirstNTopWords.length > 1 && LDAUtils.inRangeInterval(iteration, printFirstNTopWords)) {
@@ -882,9 +937,9 @@ public class UncollapsedParallelLDA extends ModifiedSimpleLDA implements LDAGibb
 			currentIteration + 
 			") \n"
 			);
-
+		logAverageMetrics(); // log the average metrics for the entire run
 		postSample();
-
+		fileHandler.flush();
 	}
 
 	protected void logTopicIndicators() {
@@ -936,12 +991,11 @@ public class UncollapsedParallelLDA extends ModifiedSimpleLDA implements LDAGibb
 			}
 			postZ();
 			long endTypeTopicUpdate = System.currentTimeMillis();
-			logger.finer("Time for updating type-topic counts: " + 
-					(endTypeTopicUpdate - beforeSync) + "ms\t");
+			logger.finer("\nIteration " + iteration + " Time for updating type-topic counts: " + 
+				(endTypeTopicUpdate - beforeSync) + "ms\t");
 
-			logger.finer("\nIteration " + iteration);
-			logger.finer("--------------------");
 			
+			/*
 			// Occasionally print more information
 			if (showTopicsInterval > 0 && iteration % showTopicsInterval == 0) {
 				double logLik = modelLogLikelihood();	
@@ -949,6 +1003,7 @@ public class UncollapsedParallelLDA extends ModifiedSimpleLDA implements LDAGibb
 				logger.info("<" + iteration + "> Log Likelihood: " + logLik);
 				logger.fine(tw);
 			}
+			*/
 
 			kdDensities.set(0);
 
@@ -1088,8 +1143,8 @@ public class UncollapsedParallelLDA extends ModifiedSimpleLDA implements LDAGibb
 				deltaOutput.flush();
 				deltaOutput.close();
 			} catch (IOException e) {
-				e.printStackTrace();
-				throw new RuntimeException(e);
+			 e.printStackTrace();
+			 throw new RuntimeException(e);
 			}
 		}
 	}
@@ -1160,8 +1215,8 @@ public class UncollapsedParallelLDA extends ModifiedSimpleLDA implements LDAGibb
 			e.printStackTrace();
 			System.exit(-1);
 		} catch (ExecutionException e) {
-			e.printStackTrace();
-			System.exit(-1);
+		 e.printStackTrace();
+		 System.exit(-1);
 		}
 	}
 
@@ -1274,8 +1329,8 @@ public class UncollapsedParallelLDA extends ModifiedSimpleLDA implements LDAGibb
 				phiMatrix[topic] = newPhi;
 			}
 			if(savePhiMeans() && samplePhiThisIteration()) {
-				for (int phi = 0; phi < phiMatrix[topic].length; phi++) {
-					phiMean[topic][phi] += phiMatrix[topic][phi];
+				for (int v = 0; v < phiMatrix[topic].length; v++) {
+					phiMean[topic][v] += phiMatrix[topic][v];
 				}
 			}
 		}
@@ -1511,6 +1566,73 @@ public class UncollapsedParallelLDA extends ModifiedSimpleLDA implements LDAGibb
 	//		return super.modelLogLikelihood();
 	//	}
 
+	/**
+	 * Computes the LDA log posterior (Doss and George, 2025)
+	 * Added on May 21, 2025 
+	 */
+	private double computeLogPosterior() {
+		final double EPS = 1e-12; // For numerical stability in log
+		double lp = 0.0;
+		// int numTopics = phi.length; this is already set in the constructor 
+		int vocabSize = phi[0].length;
+		int numDocs = data.size();
+
+		// Precompute log(theta) and log(phi)
+		double[][] logTheta = new double[numTopics][numDocs]; // K x D
+		double[][] logPhi = new double[numTopics][vocabSize]; // K x V
+		for (int k = 0; k < numTopics; k++) {
+			for (int d = 0; d < numDocs; d++) {
+				logTheta[k][d] = Math.log(theta[d][k] + EPS);
+			}
+			for (int v = 0; v < vocabSize; v++) {
+				logPhi[k][v] = Math.log(phi[k][v] + EPS);
+			}
+		}
+
+		double[] n_dj = new double[numTopics];
+		double[][] m_djt = new double[numTopics][vocabSize];
+		for (int d = 0; d < numDocs; d++) {
+			Arrays.fill(n_dj, 0.0);
+			for (int k = 0; k < numTopics; k++) {
+				Arrays.fill(m_djt[k], 0.0);
+			}
+			FeatureSequence tokenSequence = (FeatureSequence) data.get(d).instance.getData();
+			LabelSequence topicSequence = (LabelSequence) data.get(d).topicSequence;
+			int[] docTopics = topicSequence.getFeatures();
+			for (int position = 0; position < topicSequence.size(); position++) {
+				int topic = docTopics[position];
+				int type = tokenSequence.getIndexAtPosition(position);
+				n_dj[topic] += 1.0;
+				m_djt[topic][type] += 1.0;
+			}
+
+			// lp += sum over k,v of m_djt[k][v] * logPhi[k][v]
+			for (int k = 0; k < numTopics; k++) {
+				for (int v = 0; v < vocabSize; v++) {
+					double count = m_djt[k][v];
+					if (count > 0.0) {
+						lp += count * logPhi[k][v];
+					}
+				}
+			}
+
+			// lp += sum over k of (n_dj[k] + alpha[k] - 1) * logTheta[k][d]
+			for (int k = 0; k < numTopics; k++) {
+				lp += (n_dj[k] + alpha[k] - 1.0) * logTheta[k][d];
+			}
+		}
+
+		// lp += sum over k,v of (beta - 1) * logPhi[k][v]
+		double betaMinus1 = beta - 1.0;
+		for (int k = 0; k < numTopics; k++) {
+			for (int v = 0; v < vocabSize; v++) {
+				lp += betaMinus1 * logPhi[k][v];
+			}
+		}
+
+		return lp;
+	}
+
 	/* 
 	 * Uses AD-LDA logLikelihood calculation
 	 *  
@@ -1540,7 +1662,7 @@ public class UncollapsedParallelLDA extends ModifiedSimpleLDA implements LDAGibb
 
 		int[] topicCounts = new int[numTopics];
 		double[] topicLogGammas = new double[numTopics];
-		int[] docTopics;
+		int[] docTopics;  
 
 		for (int topic=0; topic < numTopics; topic++) {
 			topicLogGammas[ topic ] = Dirichlet.logGammaStirling( alpha[topic] );
@@ -1846,4 +1968,84 @@ public class UncollapsedParallelLDA extends ModifiedSimpleLDA implements LDAGibb
 	public int getNoSampledPhi() {
 		return noSampledPhi;
 	}
+
+	private void logMemoryAndThreadMetrics() {
+		// Cache MemoryMXBean and ThreadMXBean to avoid repeated lookups
+		MemoryMXBean memoryBean = ManagementFactory.getMemoryMXBean();
+		ThreadMXBean threadBean = ManagementFactory.getThreadMXBean();
+
+		// Aggregate memory and thread usage
+		totalHeapMemoryUsed += memoryBean.getHeapMemoryUsage().getUsed();
+		totalNonHeapMemoryUsed += memoryBean.getNonHeapMemoryUsage().getUsed();
+		totalThreadCount += threadBean.getThreadCount();
+	}
+
+
+	private void logDetailedMetrics(int iteration, String loggingPath) {
+		String detailsFile = loggingPath + "/log-detail-metrics.txt";
+
+		MemoryMXBean memoryBean = ManagementFactory.getMemoryMXBean();
+		MemoryUsage heapUsage = memoryBean.getHeapMemoryUsage();
+		MemoryUsage nonHeapUsage = memoryBean.getNonHeapMemoryUsage();
+		ThreadMXBean threadBean = ManagementFactory.getThreadMXBean();
+
+		// Gather metrics
+		long heapUsedMB = heapUsage.getUsed() / (1024 * 1024);
+		long heapCommittedMB = heapUsage.getCommitted() / (1024 * 1024);
+		long heapMaxMB = heapUsage.getMax() / (1024 * 1024);
+		long nonHeapUsedMB = nonHeapUsage.getUsed() / (1024 * 1024);
+		long nonHeapCommittedMB = nonHeapUsage.getCommitted() / (1024 * 1024);
+		long nonHeapMaxMB = nonHeapUsage.getMax() / (1024 * 1024);
+		int threadCount = threadBean.getThreadCount();
+		int peakThreadCount = threadBean.getPeakThreadCount();
+		long totalStartedThreadCount = threadBean.getTotalStartedThreadCount();
+		long timestamp = System.currentTimeMillis();
+
+		// Write header if file does not exist
+		File file = new File(detailsFile);
+		boolean writeHeader = !file.exists();
+
+		try (PrintWriter out = new PrintWriter(new BufferedWriter(new FileWriter(file, true)))) {
+			if (writeHeader) {
+				out.println("Iteration\tTimestamp\tHeapUsedMB\tHeapCommittedMB\tHeapMaxMB\tNonHeapUsedMB\tNonHeapCommittedMB\tNonHeapMaxMB\tThreadCount\tPeakThreadCount\tTotalStartedThreadCount");
+			}
+			out.printf("%d\t%d\t%d\t%d\t%d\t%d\t%d\t%d\t%d\t%d\t%d%n",
+					iteration,
+					timestamp,
+					heapUsedMB,
+					heapCommittedMB,
+					heapMaxMB,
+					nonHeapUsedMB,
+					nonHeapCommittedMB,
+					nonHeapMaxMB,
+					threadCount,
+					peakThreadCount,
+					totalStartedThreadCount);
+		} catch (IOException e) {
+			System.err.println("Failed to write detailed metrics to file: " + e.getMessage());
+			throw new IllegalStateException(e);
+		}
+	}
+
+
+	/**
+	 * Finalize metrics logging after all iterations are completed.
+	 */
+	private void logAverageMetrics() {
+		if (iterationCount > 0) {
+			long avgHeapMemoryUsed = totalHeapMemoryUsed / iterationCount;
+			long avgNonHeapMemoryUsed = totalNonHeapMemoryUsed / iterationCount;
+			long avgThreadCount = totalThreadCount / iterationCount;
+
+			long ipcTimeMillis = totalIpcTime.get() / 1_000_000; // Convert nanoseconds to milliseconds
+			long avgIpcTimeMillis = ipcTimeMillis / iterationCount;
+
+			System.out.println(String.format("Average IPC Overhead per Iteration: %d ms", avgIpcTimeMillis));
+			System.out.println(String.format("Average Heap Memory Used per Iteration: %d MB", avgHeapMemoryUsed / (1024 * 1024)));
+			System.out.println(String.format("Average Non-Heap Memory Used per Iteration: %d MB", avgNonHeapMemoryUsed / (1024 * 1024)));
+			System.out.println(String.format("Average Thread Count per Iteration: %d", avgThreadCount));
+		}
+	}
+
+
 }

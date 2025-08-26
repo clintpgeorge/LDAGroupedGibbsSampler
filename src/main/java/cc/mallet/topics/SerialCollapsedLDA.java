@@ -5,16 +5,21 @@ import java.io.File;
 import java.io.FileWriter;
 import java.io.IOException;
 import java.io.PrintWriter;
+import java.lang.management.ManagementFactory;
+import java.lang.management.MemoryMXBean;
+import java.lang.management.MemoryUsage;
+import java.lang.management.ThreadMXBean;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicLong;
+import java.util.logging.FileHandler;
 import java.util.logging.Logger;
+import java.util.logging.SimpleFormatter;
 
 import org.apache.commons.lang.NotImplementedException;
 
 import cc.mallet.configuration.LDAConfiguration;
-// import cc.mallet.topics.SimpleLDA;
-// import cc.mallet.topics.TopicAssignment;
 import cc.mallet.types.Dirichlet;
 import cc.mallet.types.FeatureSequence;
 import cc.mallet.types.Instance;
@@ -22,18 +27,29 @@ import cc.mallet.types.InstanceList;
 import cc.mallet.types.LabelSequence;
 import cc.mallet.util.LDAUtils;
 import cc.mallet.util.LoggingUtils;
-import cc.mallet.util.MalletLogger;
 import cc.mallet.util.Randoms;
 import cc.mallet.util.Timing;
 
 public class SerialCollapsedLDA extends SimpleLDA implements LDAGibbsSampler {
 
 	private static final long serialVersionUID = 7533987649605469394L;
-	private static Logger logger = MalletLogger.getLogger(SerialCollapsedLDA.class.getName());
+	protected static Logger logger = Logger.getLogger(SerialCollapsedLDA.class.getName());
+	protected static FileHandler fileHandler; 
 	LDAConfiguration config;
 	int currentIteration = 0 ;
 	private int startSeed;
 	boolean abort = false;
+
+	private static final int RESOURCE_LOG_INTERVAL = 100; // Log resource usage every 100 iterations
+	private long totalHeapMemoryUsed = 0;
+	private long totalNonHeapMemoryUsed = 0;
+	private long totalThreadCount = 0;
+	private int iterationCount = 0;
+	private AtomicLong totalIpcTime = new AtomicLong(0); // Tracks total IPC time in nanoseconds
+
+	protected double[][] theta;
+	protected double[][] phi;
+	protected boolean computeDocTopicDistances = false; // default is false 
 
 	// The original training data
 	InstanceList trainingData;
@@ -48,8 +64,25 @@ public class SerialCollapsedLDA extends SimpleLDA implements LDAGibbsSampler {
 				new Randoms(config.getSeed(LDAConfiguration.SEED_DEFAULT))
 				);
 		setConfiguration(config);
+
+		try {
+			String allLogFile = config.getLoggingUtil().getLogDir().getAbsolutePath() + "/" + config.getScheme() + "-execution-log.txt";
+			fileHandler = new FileHandler(allLogFile, true);
+			fileHandler.setEncoding("UTF-8");
+			fileHandler.setLevel(java.util.logging.Level.ALL);
+			fileHandler.setFormatter(new SimpleFormatter());
+			fileHandler.setFilter(null);
+			logger.setLevel(java.util.logging.Level.ALL);
+			logger.setUseParentHandlers(false);
+			logger.addHandler(fileHandler);
+		} catch (IOException e) {
+			e.printStackTrace();
+			throw new RuntimeException("Failed to initialize FileHandler for logging", e);
+		}
+
 		printLogLikelihood = false;
 		showTopicsInterval = config.getTopicInterval(LDAConfiguration.TOPIC_INTER_DEFAULT);
+		computeDocTopicDistances = config.computeDocTopicDistances(LDAConfiguration.COMPUTE_DOC_TOPIC_DISTANCES_DEFAULT);
 	}
 	
 	@Override
@@ -144,6 +177,12 @@ public class SerialCollapsedLDA extends SimpleLDA implements LDAGibbsSampler {
 
 			long endSamplingTime = System.currentTimeMillis();
 
+			// Log progress at regular intervals
+			logMemoryAndThreadMetrics();
+			iterationCount++; // Increment the iteration count for logging purposes 
+			if (iteration % RESOURCE_LOG_INTERVAL == 0) 
+				logDetailedMetrics(iteration, loggingPath);
+
 			if(config!= null) { 
 				config.getLoggingUtil().logTiming(new Timing(iterationStart,elapsedMillis,"CollapsedSample_Z"));
 			}
@@ -153,7 +192,7 @@ public class SerialCollapsedLDA extends SimpleLDA implements LDAGibbsSampler {
 				LDAUtils.writeBinaryIntMatrix(LDAUtils.getDocumentTopicCounts(data, numTopics), iteration, data.size(), numTopics, binOutput.getAbsolutePath() + "/Serial_M");
 			}
 
-			if (showTopicsInterval > 0 && iteration % showTopicsInterval == 0 && computeLikelihood) {
+			if (computeLikelihood) {
 				if(config!= null) { 
 					logLik = modelLogLikelihood();
 					tw = topWords (wordsPerTopic);
@@ -166,8 +205,8 @@ public class SerialCollapsedLDA extends SimpleLDA implements LDAGibbsSampler {
 				if(topIndices==null) {
 					topIndices = LDAUtils.getTopWordIndices(nWords, numTypes, numTopics, typeTopicCounts, alphabet);
 				}
-				double [][] phi = LDAUtils.drawDirichlets(typeTopicCounts);
-				LDAUtils.writeBinaryDoubleMatrixIndices(LDAUtils.transpose(phi), iteration, binOutput.getAbsolutePath() + "/Selected_Phi_KxV", topIndices);
+				double [][] phiM = LDAUtils.drawDirichlets(typeTopicCounts);
+				LDAUtils.writeBinaryDoubleMatrixIndices(LDAUtils.transpose(phiM), iteration, binOutput.getAbsolutePath() + "/Selected_Phi_KxV", topIndices);
 			}
 
 			// Start changes on Jan 14, 2022 ---------
@@ -176,37 +215,39 @@ public class SerialCollapsedLDA extends SimpleLDA implements LDAGibbsSampler {
 
 				// Augmented Gibbs sampling of \theta
 				int[][] docTopicCounts = LDAUtils.getDocumentTopicCounts(data, numTopics, numDocuments);
-				double[][] theta = LDAUtils.drawDirichlets(docTopicCounts, alpha);
+				theta = LDAUtils.drawDirichlets(docTopicCounts, alpha);
 
 				// Compute Quantiy C_s
-				StringBuilder strMinDocsDist = new StringBuilder();
-				strMinDocsDist.append(iteration);
-				for (int d = 0; d < numDocuments; d++) {
-					double minDocsDist = 1e+20;
-					for (int dd = 0; dd < numDocuments; dd++) {
-						if (d != dd) {
-							// compute Euclidean distance between \theta_d, \theta_s
-							double docDist = 0.0;
-							for (int k = 0; k < numTopics; k++) {
-								docDist += Math.pow(theta[d][k] - theta[dd][k], 2.0);
-							}
-							docDist = Math.sqrt(docDist);
-							if (docDist < minDocsDist) {
-								minDocsDist = docDist;
+				if (computeDocTopicDistances) {
+					StringBuilder strMinDocsDist = new StringBuilder();
+					strMinDocsDist.append(iteration);
+					for (int d = 0; d < numDocuments; d++) {
+						double minDocsDist = 1e+20;
+						for (int dd = 0; dd < numDocuments; dd++) {
+							if (d != dd) {
+								// compute Euclidean distance between \theta_d, \theta_s
+								double docDist = 0.0;
+								for (int k = 0; k < numTopics; k++) {
+									docDist += Math.pow(theta[d][k] - theta[dd][k], 2.0);
+								}
+								docDist = Math.sqrt(docDist);
+								if (docDist < minDocsDist) {
+									minDocsDist = docDist;
+								}
 							}
 						}
+						strMinDocsDist.append(",");
+						strMinDocsDist.append(minDocsDist);
 					}
-					strMinDocsDist.append(",");
-					strMinDocsDist.append(minDocsDist);
-				}
 
-				// TODO: Find an efficient way to save the distances
-				String docDistFile = loggingPath + "/min_doc_distances.csv";
-				try (PrintWriter out = new PrintWriter(new BufferedWriter(new FileWriter(docDistFile, true)))) {
-					out.println(strMinDocsDist.toString());
-				} catch (IOException e) {
-					e.printStackTrace();
-					System.err.println("Could not write minimum topic distance file");
+					// TODO: Find an efficient way to save the distances
+					String docDistFile = loggingPath + "/min_doc_distances.csv";
+					try (PrintWriter out = new PrintWriter(new BufferedWriter(new FileWriter(docDistFile, true)))) {
+						out.println(strMinDocsDist.toString());
+					} catch (IOException e) {
+						e.printStackTrace();
+						System.err.println("Could not write minimum topic distance file");
+					}
 				}
 
 				if (printFirstNDocs.length > 1 && LDAUtils.inRangeInterval(iteration, printFirstNDocs)) {
@@ -231,33 +272,36 @@ public class SerialCollapsedLDA extends SimpleLDA implements LDAGibbsSampler {
 				}
 
 				// Augmented Gibbs sampling of \phi
-				double[][] phi = LDAUtils.drawDirichlets(typeTopicCounts, beta);
+				// the typeTopicCounts matrix is VxK; confirmed on June 6, 2025 --- TODO: Need to study this more
+				phi = LDAUtils.drawDirichlets(LDAUtils.transpose(typeTopicCounts), beta);
 
 				// Compute Quantity B 
-				double minTopicDist = 1e+20;
 				int K = phi.length; // number of topics
 				int V = phi[0].length; // number of unique words in the vocabulary
-				for (int i = 0; i < K; i++) {
-					for (int j = 0; j < i; j++) {
-						// compute Euclidean distance between \phi_i, \phi_j
-						double topicDist = 0.0;
-						for (int v = 0; v < V; v++) {
-							topicDist += Math.pow(phi[i][v] - phi[j][v], 2.0);
-						}
-						topicDist = Math.sqrt(topicDist);
-						if (topicDist < minTopicDist) {
-							minTopicDist = topicDist;
+				if (computeDocTopicDistances) {
+					double minTopicDist = 1e+20;
+					for (int i = 0; i < K; i++) {
+						for (int j = 0; j < i; j++) {
+							// compute Euclidean distance between \phi_i, \phi_j
+							double topicDist = 0.0;
+							for (int v = 0; v < V; v++) {
+								topicDist += Math.pow(phi[i][v] - phi[j][v], 2.0);
+							}
+							topicDist = Math.sqrt(topicDist);
+							if (topicDist < minTopicDist) {
+								minTopicDist = topicDist;
+							}
 						}
 					}
-				}
 
-				// TODO: Find an efficient way to save the distances
-				String topicDistFile = loggingPath + "/min_topic_distances.csv";
-				try (PrintWriter out = new PrintWriter(new BufferedWriter(new FileWriter(topicDistFile, true)))) {
-					out.println(iteration + "," + minTopicDist);
-				} catch (IOException e) {
-					e.printStackTrace();
-					System.err.println("Could not write minimum topic distance file");
+					// TODO: Find an efficient way to save the distances
+					String topicDistFile = loggingPath + "/min_topic_distances.csv";
+					try (PrintWriter out = new PrintWriter(new BufferedWriter(new FileWriter(topicDistFile, true)))) {
+						out.println(iteration + "," + minTopicDist);
+					} catch (IOException e) {
+						e.printStackTrace();
+						System.err.println("Could not write minimum topic distance file");
+					}
 				}
 
 				// Saves the phi matrix in every diagnostic iteration
@@ -270,6 +314,11 @@ public class SerialCollapsedLDA extends SimpleLDA implements LDAGibbsSampler {
 							iteration);
 					LDAUtils.writeASCIIDoubleMatrix(phi, fn, ",");
 				}
+
+				// Start changes on May 21, 2025 ----------
+				double logPosterior = computeLogPosterior();	
+				LDAUtils.logPosteriorToFile(logPosterior, iteration, loggingPath, logger);
+				// End changes on May 21, 2025 ---------
 			}
 			// End of changes on Jan 14, 2022 ---------
 
@@ -295,6 +344,9 @@ public class SerialCollapsedLDA extends SimpleLDA implements LDAGibbsSampler {
 			currentIteration + 
 			") \n"
 			);
+		
+		logAverageMetrics();
+		fileHandler.flush();
 
 	}
 
@@ -311,6 +363,73 @@ public class SerialCollapsedLDA extends SimpleLDA implements LDAGibbsSampler {
 	 */
 	public void setConfiguration(LDAConfiguration config) {
 		this.config = config;
+	}
+	/**
+	 * Computes the LDA log posterior (Doss and George, 2025)
+	 * Added on May 21, 2025 
+	 */
+	private double computeLogPosterior() {
+		final double EPS = 1e-12; // For numerical stability in log
+		double lp = 0.0;
+		// int numTopics = phi.length; no need to redefine this, already defined in SimpleLD
+		int vocabSize = phi[0].length;
+		int numDocs = data.size();
+
+		// Precompute log(theta) and log(phi)
+		double[][] logTheta = new double[numTopics][numDocs]; // K x D
+		double[][] logPhi = new double[numTopics][vocabSize]; // K x V
+
+		for (int k = 0; k < numTopics; k++) {
+			for (int d = 0; d < numDocs; d++) {
+				logTheta[k][d] = Math.log(theta[d][k] + EPS);
+			}
+			for (int v = 0; v < vocabSize; v++) {
+				logPhi[k][v] = Math.log(phi[k][v] + EPS);
+			}
+		}
+
+		double[] n_dj = new double[numTopics];
+		double[][] m_djt = new double[numTopics][vocabSize];
+		for (int d = 0; d < numDocs; d++) {
+			Arrays.fill(n_dj, 0.0);
+			for (int k = 0; k < numTopics; k++) {
+				Arrays.fill(m_djt[k], 0.0);
+			}
+			FeatureSequence tokenSequence = (FeatureSequence) data.get(d).instance.getData();
+			LabelSequence topicSequence = (LabelSequence) data.get(d).topicSequence;
+			int[] docTopics = topicSequence.getFeatures();
+			for (int position = 0; position < topicSequence.size(); position++) {
+				int topic = docTopics[position];
+				int type = tokenSequence.getIndexAtPosition(position);
+				n_dj[topic] += 1.0;
+				m_djt[topic][type] += 1.0;
+			}
+
+			// lp += sum over k,v of m_djt[k][v] * logPhi[k][v]
+			for (int k = 0; k < numTopics; k++) {
+				for (int v = 0; v < vocabSize; v++) {
+					double count = m_djt[k][v];
+					if (count > 0.0) {
+						lp += count * logPhi[k][v];
+					}
+				}
+			}
+
+			// lp += sum over k of (n_dj[k] + alpha - 1) * logTheta[k][d]
+			for (int k = 0; k < numTopics; k++) {
+				lp += (n_dj[k] + alpha - 1.0) * logTheta[k][d];
+			}
+		}
+
+		// lp += sum over k,v of (beta - 1) * logPhi[k][v]
+		double betaMinus1 = beta - 1.0;
+		for (int k = 0; k < numTopics; k++) {
+			for (int v = 0; v < vocabSize; v++) {
+				lp += betaMinus1 * logPhi[k][v];
+			}
+		}
+
+		return lp;
 	}
 
 	/* 
@@ -552,6 +671,9 @@ public class SerialCollapsedLDA extends SimpleLDA implements LDAGibbsSampler {
 		}
 		return res;
 	}
+
+
+
 	
 	public double [][] getZbar() {
 		return ModifiedSimpleLDA.getZbar(data,numTopics);
@@ -677,4 +799,82 @@ public class SerialCollapsedLDA extends SimpleLDA implements LDAGibbsSampler {
 		}
 
 	}
+
+	private void logMemoryAndThreadMetrics() {
+		// Cache MemoryMXBean and ThreadMXBean to avoid repeated lookups
+		MemoryMXBean memoryBean = ManagementFactory.getMemoryMXBean();
+		ThreadMXBean threadBean = ManagementFactory.getThreadMXBean();
+
+		// Aggregate memory and thread usage
+		totalHeapMemoryUsed += memoryBean.getHeapMemoryUsage().getUsed();
+		totalNonHeapMemoryUsed += memoryBean.getNonHeapMemoryUsage().getUsed();
+		totalThreadCount += threadBean.getThreadCount();
+	}
+
+	private void logDetailedMetrics(int iteration, String loggingPath) {
+		String detailsFile = loggingPath + "/log-detail-metrics.txt";
+
+		MemoryMXBean memoryBean = ManagementFactory.getMemoryMXBean();
+		MemoryUsage heapUsage = memoryBean.getHeapMemoryUsage();
+		MemoryUsage nonHeapUsage = memoryBean.getNonHeapMemoryUsage();
+		ThreadMXBean threadBean = ManagementFactory.getThreadMXBean();
+
+		// Gather metrics
+		long heapUsedMB = heapUsage.getUsed() / (1024 * 1024);
+		long heapCommittedMB = heapUsage.getCommitted() / (1024 * 1024);
+		long heapMaxMB = heapUsage.getMax() / (1024 * 1024);
+		long nonHeapUsedMB = nonHeapUsage.getUsed() / (1024 * 1024);
+		long nonHeapCommittedMB = nonHeapUsage.getCommitted() / (1024 * 1024);
+		long nonHeapMaxMB = nonHeapUsage.getMax() / (1024 * 1024);
+		int threadCount = threadBean.getThreadCount();
+		int peakThreadCount = threadBean.getPeakThreadCount();
+		long totalStartedThreadCount = threadBean.getTotalStartedThreadCount();
+		long timestamp = System.currentTimeMillis();
+
+		// Write header if file does not exist
+		File file = new File(detailsFile);
+		boolean writeHeader = !file.exists();
+
+		try (PrintWriter out = new PrintWriter(new BufferedWriter(new FileWriter(file, true)))) {
+			if (writeHeader) {
+				out.println("Iteration\tTimestamp\tHeapUsedMB\tHeapCommittedMB\tHeapMaxMB\tNonHeapUsedMB\tNonHeapCommittedMB\tNonHeapMaxMB\tThreadCount\tPeakThreadCount\tTotalStartedThreadCount");
+			}
+			out.printf("%d\t%d\t%d\t%d\t%d\t%d\t%d\t%d\t%d\t%d\t%d%n",
+					iteration,
+					timestamp,
+					heapUsedMB,
+					heapCommittedMB,
+					heapMaxMB,
+					nonHeapUsedMB,
+					nonHeapCommittedMB,
+					nonHeapMaxMB,
+					threadCount,
+					peakThreadCount,
+					totalStartedThreadCount);
+		} catch (IOException e) {
+			System.err.println("Failed to write detailed metrics to file: " + e.getMessage());
+			throw new IllegalStateException(e);
+		}
+	}
+
+
+	/**
+	 * Finalize metrics logging after all iterations are completed.
+	 */
+	private void logAverageMetrics() {
+		if (iterationCount > 0) {
+			long avgHeapMemoryUsed = totalHeapMemoryUsed / iterationCount;
+			long avgNonHeapMemoryUsed = totalNonHeapMemoryUsed / iterationCount;
+			long avgThreadCount = totalThreadCount / iterationCount;
+
+			long ipcTimeMillis = totalIpcTime.get() / 1_000_000; // Convert nanoseconds to milliseconds
+			long avgIpcTimeMillis = ipcTimeMillis / iterationCount;
+
+			System.out.println(String.format("Average IPC Overhead per Iteration: %d ms", avgIpcTimeMillis));
+			System.out.println(String.format("Average Heap Memory Used per Iteration: %d MB", avgHeapMemoryUsed / (1024 * 1024)));
+			System.out.println(String.format("Average Non-Heap Memory Used per Iteration: %d MB", avgNonHeapMemoryUsed / (1024 * 1024)));
+			System.out.println(String.format("Average Thread Count per Iteration: %d", avgThreadCount));
+		}
+	}
+
 }

@@ -15,7 +15,7 @@ public interface LDAConfiguration {
 	public static final int NO_TOPIC_BATCHES_DEFAULT = 2;
 	public static final int RARE_WORD_THRESHOLD = 0;
 	public static final Integer NO_ITER_DEFAULT = 1500;
-	public static final int TOPIC_INTER_DEFAULT = 10;
+	public static final int TOPIC_INTER_DEFAULT = -1; // -1 means no output
 	public static final int SEED_DEFAULT = 0; // Default should be to use clock time
 	public static final int RESULTS_SIZE_DEFAULT = 1;
 	public static final String BATCH_BUILD_SCHEME_DEFAULT = BatchBuilderFactory.EVEN_SPLIT;
@@ -53,6 +53,7 @@ public interface LDAConfiguration {
 	public static final boolean COMPUTE_LIKELIHOOD = true;
 
 	public static final boolean SAVE_PHI = false; // added on Jan 14, 2022
+	public static final boolean COMPUTE_DOC_TOPIC_DISTANCES_DEFAULT = false; // added on June 4, 2025
 
 	public boolean computeLikelihood();
 
@@ -240,4 +241,6 @@ public interface LDAConfiguration {
 	public String getCorpusFilename();
 
 	public boolean logTopicIndicators(boolean b);
+
+	public boolean computeDocTopicDistances(boolean defaultValue); // for diagnostics
 }

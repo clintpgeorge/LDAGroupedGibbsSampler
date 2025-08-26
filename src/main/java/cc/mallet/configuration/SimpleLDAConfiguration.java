@@ -818,5 +818,8 @@ public class SimpleLDAConfiguration implements LDAConfiguration {
 	
 	// ----------- plda --------------
 
-
+	@Override
+	public boolean computeDocTopicDistances(boolean defaultValue) { // Added on June 4, 2025 
+		return LDAConfiguration.COMPUTE_DOC_TOPIC_DISTANCES_DEFAULT;
+	}
 }

@@ -23,6 +23,8 @@
 hs_err_pid*
 
 # specific to this project 
+bin/*
+Users/*
 Runs/*
 TestRuns/*
 target/*
